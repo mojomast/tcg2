@@ -593,7 +593,7 @@ export class GameEngine {
             return false;
         }
 
-        // 3. Validation: Creatures
+        // 3. Validation: Creatures Exist and Can Attack
         const playerState = this.gameState.players.find(p => p.playerId === playerId);
         if (!playerState) {
             console.error(`Action failed: Player state not found for ${playerId}.`); // Should not happen
@@ -609,14 +609,15 @@ export class GameEngine {
                 return false;
             }
 
+            const baseCard = this.gameState.gameObjects[creature.objectId]; // Get base card data for keyword checks
+
             if (creature.isTapped) {
                  console.warn(`Action failed: Creature ${creature.cardId} (${creatureId}) is tapped.`);
-                return false;
+                 return false;
             }
 
-            if (creature.summoningSickness) {
-                 console.warn(`Action failed: Creature ${creature.cardId} (${creatureId}) has summoning sickness.`);
-                // TODO: Add check for Haste ability later
+            if (creature.summoningSickness && !baseCard?.keywords?.includes('Haste')) { // Check for Haste
+                 console.warn(`Action failed: Creature ${creature.cardId} (${creatureId}) has summoning sickness and no Haste.`);
                 return false;
             }
 
@@ -632,11 +633,15 @@ export class GameEngine {
         const assignmentString = Object.entries(this.gameState.attackers).map(([b, a]) => `${b} -> ${a}`).join('; ');
         console.log(` > Attackers assigned: ${assignmentString || 'None'}`);
 
-        // 2. Tap the attacker
+        // 2. Tap the attackers (unless they have Vigilance)
         validatedAttackers.forEach(attacker => {
-            attacker.isTapped = true;
-            // TODO: Add check for Vigilance ability later
-            console.log(` > Creature ${attacker.cardId} (${attacker.objectId}) declared attacking and tapped.`);
+            const baseCard = this.gameState.gameObjects[attacker.objectId]; // Get base card for Vigilance check
+            if (!baseCard?.keywords?.includes('Vigilance')) {
+                attacker.isTapped = true;
+                console.log(` > Creature ${attacker.cardId} (${attacker.objectId}) declared attacking and tapped.`);
+            } else {
+                 console.log(` > Creature ${attacker.cardId} (${attacker.objectId}) declared attacking (Vigilance - not tapped).`);
+            }
         });
 
         // 3. Pass priority to the non-active player for declaring blockers
@@ -680,33 +685,48 @@ export class GameEngine {
                 console.warn(`Action failed: Blocker creature ${blockerId} not found on Player ${playerId}'s battlefield.`);
                 return false;
             }
+            
+            // b) Validate Blocker Capabilities
+            const blockerObject = this.gameState.gameObjects[blockerId]; // Get base card data for blocker
+            if (!blockerObject) { // Ensure blocker card data exists
+                console.warn(`Action failed: Base card data not found for blocker ${blockerId}.`);
+                return false;
+            }
+            
             if (blockerCreature.isTapped) {
                 console.warn(`Action failed: Blocker ${blockerCreature.cardId} (${blockerId}) is tapped.`);
                 return false;
             }
-            // TODO: Add check if creature can block (e.g., 'Cannot Block' ability)
+            
+            if (blockerObject.keywords?.includes('Cannot Block')) {
+                console.warn(`Action failed: Blocker ${blockerCreature.cardId} (${blockerId}) has 'Cannot Block'.`);
+                return false;
+            }
 
-            // b) Validate Attacker
+            // c) Validate Attacker
             if (!allAttackerIds.includes(attackerId)) {
                  console.warn(`Action failed: Creature ${attackerId} is not a declared attacker.`);
                 return false;
             }
 
-            // c) Validate Legality (Basic Flying Example)
+            // d) Validate Legality (Flying vs Reach/Flying)
             const attackerObject = this.gameState.gameObjects[attackerId]; // Get base card data for attacker
-            const blockerObject = this.gameState.gameObjects[blockerId]; // Get base card data for blocker
-            // Assuming 'Flying' is a keyword in card definition (e.g., attackerObject.keywords.includes('Flying'))
-            // This requires keywords to be defined on the Card interface
-            const attackerHasFlying = attackerObject?.keywords?.includes('Flying'); // Placeholder check
-            const blockerHasFlying = blockerObject?.keywords?.includes('Flying'); // Placeholder check
+            if (!attackerObject) { // Ensure attacker card data exists
+                console.warn(`Action failed: Base card data not found for attacker ${attackerId}.`);
+                return false;
+            }
+            
+            // Check if attacker has Flying and blocker doesn't have Flying or Reach
+            const attackerHasFlying = attackerObject.keywords?.includes('Flying');
+            const blockerHasFlying = blockerObject.keywords?.includes('Flying');
+            const blockerHasReach = blockerObject.keywords?.includes('Reach');
 
-            if (attackerHasFlying && !blockerHasFlying) {
-                 console.warn(`Action failed: Blocker ${blockerId} cannot block flying attacker ${attackerId}.`);
-                 // TODO: Check for Blocker having Reach
+            if (attackerHasFlying && !blockerHasFlying && !blockerHasReach) {
+                 console.warn(`Action failed: Blocker ${blockerId} cannot block flying attacker ${attackerId} (needs Flying or Reach).`);
                  return false;
             }
 
-            // d) Check if blocker already assigned
+            // e) Check if blocker already assigned
             if (validatedBlockers[blockerId]) {
                 console.warn(`Action failed: Blocker ${blockerId} assigned to multiple attackers.`);
                 return false;
@@ -759,12 +779,13 @@ export class GameEngine {
         const dealingDamageIds = Object.keys(involvedCreatures).filter(id => {
             const creature = involvedCreatures[id];
             const dealsFirstStrike = creature.keywords?.includes('First Strike'); // Assuming keywords exist
-            return isFirstStrike ? dealsFirstStrike : true; // All deal damage in normal step
+            return isFirstStrike ? dealsFirstStrike : !dealsFirstStrike || creature.keywords?.includes('Double Strike'); // First Strike step: only First Strike creatures, Normal step: all non-First Strike creatures plus Double Strike
         });
 
         // Calculate damage assignments
         const damageAssignments: { targetId: GameObjectId | PlayerId, amount: number, sourceId: GameObjectId }[] = [];
 
+        // Attackers assign damage
         for (const attackerId of Object.keys(attackersMap)) {
             if (!dealingDamageIds.includes(attackerId)) continue; // Skip if not dealing damage this step
 
@@ -772,7 +793,9 @@ export class GameEngine {
             if (!attacker) continue; // Should not happen
             const attackerPower = attacker.power ?? 0;
             const defendingPlayerId = attackersMap[attackerId];
+            const attackerHasTrample = attacker.keywords?.includes('Trample'); // Check for Trample
 
+            // Find all blockers for this attacker
             const blockers = Object.entries(blockersMap)
                 .filter(([_, assignedAttackerId]) => assignedAttackerId === attackerId)
                 .map(([blockerId, _]) => involvedCreatures[blockerId])
@@ -780,11 +803,27 @@ export class GameEngine {
 
             if (blockers.length > 0) {
                 // Attacker is blocked - assign damage to blocker(s)
-                // Basic assignment: deals all damage to the first blocker
-                // TODO: Implement damage assignment order for multiple blockers
-                if (blockers[0]) {
-                    damageAssignments.push({ targetId: blockers[0].objectId, amount: attackerPower, sourceId: attackerId });
-                    console.log(` > Attacker ${attackerId} (${attackerPower} power) assigns ${attackerPower} damage to Blocker ${blockers[0].objectId}.`);
+                // Basic assignment: deals damage sequentially until attacker's power is used up or blockers are dead
+                let remainingAttackerPower = attackerPower;
+                for (const blocker of blockers) { // Iterate through assigned blockers
+                    if (remainingAttackerPower <= 0) break;
+
+                    const blockerToughness = blocker.toughness ?? 0;
+                    // Damage needed to destroy (considering already marked damage)
+                    const lethalDamageToBlocker = Math.max(0, blockerToughness - blocker.damageMarked);
+                    const damageToAssignToBlocker = Math.min(remainingAttackerPower, lethalDamageToBlocker);
+
+                    if (damageToAssignToBlocker > 0) {
+                        damageAssignments.push({ targetId: blocker.objectId, amount: damageToAssignToBlocker, sourceId: attackerId });
+                        console.log(` > Attacker ${attackerId} (${attackerPower} power) assigns ${damageToAssignToBlocker} damage to Blocker ${blocker.objectId}.`);
+                        remainingAttackerPower -= damageToAssignToBlocker;
+                    }
+                }
+
+                // Trample damage - excess damage goes to player if attacker has Trample
+                if (attackerHasTrample && remainingAttackerPower > 0) {
+                    damageAssignments.push({ targetId: defendingPlayerId, amount: remainingAttackerPower, sourceId: attackerId });
+                    console.log(` > Attacker ${attackerId} (Trample) assigns ${remainingAttackerPower} excess damage to Player ${defendingPlayerId}.`);
                 }
             } else {
                 // Attacker is unblocked - assign damage to player
@@ -836,6 +875,144 @@ export class GameEngine {
         console.log("Damage assignment complete for this step.");
     }
 
+    // --- State-Based Actions --- //
+
+    private _checkStateBasedActions(): boolean { // Return boolean indicating if any SBAs were performed
+        console.log("Checking State-Based Actions...");
+        let sbAsPerformedThisCheck = false; // Tracks if *any* SBA happened during the entire check cycle
+        let sbAsPerformedThisPass = false; // Tracks if an SBA happened in the *current* loop pass
+        let loopGuard = 0; // Prevent infinite loops
+        const maxLoops = 10; // Arbitrary limit
+
+        do {
+            sbAsPerformedThisPass = false; // Reset flag for this pass
+            loopGuard++;
+            if (loopGuard > maxLoops) {
+                 console.error("SBA check loop limit exceeded!");
+                 break;
+            }
+
+            // Check if game already ended in a previous pass or step
+            if (this.gameState.winner) {
+                 console.log("SBA Check: Game already ended.");
+                 break; // Stop checking SBAs if a winner is determined
+            }
+
+            const creaturesToDestroy: { playerId: PlayerId, creatureId: GameObjectId }[] = [];
+
+            // Check players
+            for (const playerState of this.gameState.players) {
+                 // a) Check for player life loss (Game End Condition)
+                 if (playerState.life <= 0 && !this.gameState.winner) { // Check !this.gameState.winner handles simultaneous loss (first check wins for now)
+                    console.log(`SBA: Player ${playerState.playerId} has ${playerState.life} life or less.`);
+                    // Determine opponent
+                    const opponent = this.gameState.players.find(p => p.playerId !== playerState.playerId);
+                    if (opponent) {
+                        this.gameState.winner = opponent.playerId;
+                         console.log(`GAME OVER: Player ${opponent.playerId} wins!`);
+                         sbAsPerformedThisCheck = true; // Game ending is an SBA
+                         sbAsPerformedThisPass = true; // Mark SBA performed this pass
+                         break; // Stop checking further SBAs for this pass once game ends
+                    } else {
+                         console.error("Could not determine opponent to declare winner."); // Should not happen in 2-player game
+                    }
+                 }
+
+                 // b) Check creatures for lethal damage
+                 for (const creature of playerState.battlefield.creatures) {
+                    const baseCard = this.gameState.gameObjects[creature.objectId];
+                    const toughness = baseCard?.toughness ?? 0;
+                    if (creature.damageMarked > 0 && creature.damageMarked >= toughness) {
+                         console.log(`SBA: Creature ${creature.objectId} (${baseCard?.name}) has lethal damage (${creature.damageMarked} >= ${toughness}). Marked for destruction.`);
+                         creaturesToDestroy.push({ playerId: playerState.playerId, creatureId: creature.objectId });
+                         sbAsPerformedThisCheck = true;
+                         sbAsPerformedThisPass = true;
+                    }
+                 }
+
+                  // TODO: Add other SBAs (e.g., legend rule, 0 toughness creatures)
+             }
+ 
+            // Apply destruction
+            if (creaturesToDestroy.length > 0) {
+                console.log(`Applying destruction for ${creaturesToDestroy.length} creatures...`);
+                for (const { playerId, creatureId } of creaturesToDestroy) {
+                     const playerState = this.gameState.players.find(p => p.playerId === playerId);
+                     if (playerState) {
+                         const creatureIndex = playerState.battlefield.creatures.findIndex(c => c.objectId === creatureId);
+                         if (creatureIndex > -1) {
+                             const destroyedCreature = playerState.battlefield.creatures.splice(creatureIndex, 1)[0];
+                             playerState.graveyard.push(destroyedCreature.objectId); // Move ID to graveyard
+                             // Note: BattlefieldCard state like counters/damage is lost here.
+                             // A more robust implementation might keep the BattlefieldCard instance
+                             // in the graveyard or use a different structure.
+                             console.log(`  - Moved ${creatureId} from Player ${playerId}'s battlefield to graveyard.`);
+                         } else {
+                             console.warn(`  - Creature ${creatureId} marked for destruction not found on Player ${playerId}'s battlefield.`);
+                         }
+                    }
+                }
+            }
+
+        } while (sbAsPerformedThisPass && loopGuard <= maxLoops);
+
+        if (loopGuard > 1) {
+             console.log(`SBA checks completed after ${loopGuard -1} passes.`);
+        } else {
+             console.log("No SBAs performed.");
+        }
+        
+        return sbAsPerformedThisCheck;
+    }
+
+    // --- Helper Methods --- //
+
+    private _doesAnyCreatureHaveKeyword(keyword: Keyword): boolean {
+        for (const player of this.gameState.players) {
+            for (const creature of player.battlefield.creatures) {
+                 const baseCard = this.gameState.gameObjects[creature.objectId];
+                 if (baseCard?.keywords?.includes(keyword)) {
+                     return true;
+                 }
+            }
+        }
+        return false;
+    }
+
+    private _clearCombatState(): void {
+        console.log("Clearing combat state (attackers/blockers).");
+        this.gameState.attackers = {};
+        this.gameState.blockers = {};
+    }
+    
+    private _advanceTurn(): void {
+        console.log("Advancing turn...");
+        // Change active player
+        const currentActivePlayerIndex = this.gameState.players.findIndex(p => p.playerId === this.gameState.activePlayerId);
+        const nextActivePlayerIndex = (currentActivePlayerIndex + 1) % this.gameState.players.length;
+        this.gameState.activePlayerId = this.gameState.players[nextActivePlayerIndex].playerId;
+        this.gameState.turnNumber++;
+
+        // Set phase and step to the beginning of the new turn
+        this.gameState.currentPhase = 'BEGIN';
+        this.gameState.currentStep = 'UNTAP';
+        console.log(`New Turn: ${this.gameState.turnNumber}. Active Player: ${this.gameState.activePlayerId}. Phase: ${this.gameState.currentPhase}, Step: ${this.gameState.currentStep}`);
+
+        // Perform Untap actions for the new active player
+        const activePlayerUntap = this.gameState.players.find(p => p.playerId === this.gameState.activePlayerId);
+        if (activePlayerUntap) {
+            console.log(`Untapping permanents for Player ${this.gameState.activePlayerId}...`);
+            activePlayerUntap.battlefield.creatures.forEach(c => c.isTapped = false);
+            // Untap other permanents (Lands, Artifacts) - TODO
+            console.log("Permanents untapped.");
+            // Reset 'land played' flag
+            activePlayerUntap.hasPlayedResourceThisTurn = false;
+        }
+
+        // Grant priority to the new active player for the Untap step
+        this.grantPriority(this.gameState.activePlayerId);
+    }
+
     public passPriority(): void {
         const currentPriorityPlayerId = this.gameState.priorityPlayerId;
         const activePlayerId = this.gameState.activePlayerId;
@@ -872,109 +1049,5 @@ export class GameEngine {
 
     public getGameState(): GameState {
         return this.gameState;
-    }
-
-    // --- State-Based Actions --- //
-    private _checkStateBasedActions(): void {
-        console.log("Checking State-Based Actions...");
-        let sbAsPerformed = false;
-        let loopGuard = 0; // Prevent infinite loops
-        const maxLoops = 10; // Arbitrary limit
-
-        do {
-            sbAsPerformed = false; // Reset flag for this pass
-            loopGuard++;
-            if (loopGuard > maxLoops) {
-                 console.error("SBA check loop limit exceeded!");
-                 break;
-            }
-
-            // Check if game already ended in a previous pass or step
-            if (this.gameState.winner) {
-                 console.log("SBA Check: Game already ended.");
-                 break; // Stop checking SBAs if a winner is determined
-            }
-
-            const creaturesToDestroy: { playerId: PlayerId, creatureId: GameObjectId }[] = [];
-
-            // Check players
-            for (const playerState of this.gameState.players) {
-                 // a) Check for player life loss (Game End Condition)
-                 if (playerState.life <= 0 && !this.gameState.winner) { // Check !this.gameState.winner handles simultaneous loss (first check wins for now)
-                    console.log(`SBA: Player ${playerState.playerId} has ${playerState.life} life or less.`);
-                    // Determine opponent
-                    const opponent = this.gameState.players.find(p => p.playerId !== playerState.playerId);
-                    if (opponent) {
-                        this.gameState.winner = opponent.playerId;
-                         console.log(`GAME OVER: Player ${opponent.playerId} wins!`);
-                         sbAsPerformed = true; // Game ending is an SBA
-                         break; // Stop checking further SBAs for this pass once game ends
-                    } else {
-                         console.error("Could not determine opponent to declare winner."); // Should not happen in 2-player game
-                    }
-                 }
-
-                 // b) Check creatures for lethal damage
-                 for (const creature of playerState.battlefield.creatures) {
-                    const baseCard = this.gameState.gameObjects[creature.objectId];
-                    const toughness = baseCard?.toughness ?? 0;
-                    if (creature.damageMarked > 0 && creature.damageMarked >= toughness) {
-                         console.log(`SBA: Creature ${creature.objectId} (${baseCard?.name}) has lethal damage (${creature.damageMarked} >= ${toughness}). Marked for destruction.`);
-                         creaturesToDestroy.push({ playerId: playerState.playerId, creatureId: creature.objectId });
-                         sbAsPerformed = true;
-                    }
-                 }
-
-                  // TODO: Add other SBAs (e.g., legend rule, 0 toughness creatures)
-             }
- 
-            // Apply destruction
-            if (creaturesToDestroy.length > 0) {
-                console.log(`Applying destruction for ${creaturesToDestroy.length} creatures...`);
-                for (const { playerId, creatureId } of creaturesToDestroy) {
-                     const playerState = this.gameState.players.find(p => p.playerId === playerId);
-                     if (playerState) {
-                         const creatureIndex = playerState.battlefield.creatures.findIndex(c => c.objectId === creatureId);
-                         if (creatureIndex > -1) {
-                             const destroyedCreature = playerState.battlefield.creatures.splice(creatureIndex, 1)[0];
-                             playerState.graveyard.push(destroyedCreature.objectId); // Move ID to graveyard
-                             // Note: BattlefieldCard state like counters/damage is lost here.
-                             // A more robust implementation might keep the BattlefieldCard instance
-                             // in the graveyard or use a different structure.
-                             console.log(`  - Moved ${creatureId} from Player ${playerId}'s battlefield to graveyard.`);
-                         } else {
-                             console.warn(`  - Creature ${creatureId} marked for destruction not found on Player ${playerId}'s battlefield.`);
-                         }
-                    }
-                }
-            }
-
-        } while (sbAsPerformed && loopGuard <= maxLoops);
-
-        if (loopGuard > 1) {
-             console.log(`SBA checks completed after ${loopGuard -1} passes.`);
-        } else {
-             console.log("No SBAs performed.");
-        }
-    }
-
-    // --- Helper Methods --- //
-
-    private _doesAnyCreatureHaveKeyword(keyword: Keyword): boolean {
-        for (const player of this.gameState.players) {
-            for (const creature of player.battlefield.creatures) {
-                 const baseCard = this.gameState.gameObjects[creature.objectId];
-                 if (baseCard?.keywords?.includes(keyword)) {
-                     return true;
-                 }
-            }
-        }
-        return false;
-    }
-
-    private _clearCombatState(): void {
-        console.log("Clearing combat state (attackers/blockers).");
-        this.gameState.attackers = {};
-        this.gameState.blockers = {};
     }
 }

@@ -69,6 +69,7 @@ export interface PlayerState {
   };
   hasPlayedResourceThisTurn: boolean;
   maxHandSize: number;
+  hasLost: boolean; // Flag indicating if the player has lost the game
 }
 
 // Represents the overall game state
@@ -86,25 +87,8 @@ export interface GameState {
   blockers: { [blockerId: GameObjectId]: GameObjectId }; // Map blocker ID to attacker ID it's blocking
   gameLog: string[]; // Simple log for now
   winner?: PlayerId; // Set when a player wins the game
-}
-
-// Represents the state of a single player
-export interface PlayerState {
-  playerId: PlayerId;
-  life: number;
-  energy: number;
-  poisonCounters: number;
-  manaPool: { [key in ManaColor | 'colorless']?: number };
-  hand: GameObjectId[]; // IDs of card instances in hand
-  library: GameObjectId[]; // IDs of card instances in library
-  graveyard: GameObjectId[]; // IDs of card instances in graveyard
-  exile: GameObjectId[]; // IDs of card instances in exile
-  battlefield: {
-    creatures: BattlefieldCard[];
-    resources: BattlefieldCard[];
-    enchantments: BattlefieldCard[];
-    // Potentially add others like Planeswalkers, Artifacts if needed
-  };
-  hasPlayedResourceThisTurn: boolean;
-  maxHandSize: number;
+  // Optional fields for tracking effects during resolution
+  pendingDamage?: { [objectId: GameObjectId]: { damage: number; sourceId: GameObjectId; isCombat: boolean; deathtouch?: boolean } };
+  pendingLifeGain?: { [playerId: PlayerId]: number };
+  losers?: PlayerId[]; // Players who have lost during state-based action checks
 }

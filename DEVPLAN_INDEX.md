@@ -7,7 +7,7 @@ This index outlines the development steps for the Badass TCG project. Each file 
 - **[DEVPLAN_03_Game_Loop_Engine.md](DEVPLAN_03_Game_Loop_Engine.md)**: Implementing the server-side turn structure and phase transitions.
 - **[DEVPLAN_04_Resource_System.md](DEVPLAN_04_Resource_System.md)**: Implementing Mana generation, tracking, and spending.
 - **[DEVPLAN_05_Action_Play_Card.md](DEVPLAN_05_Action_Play_Card.md)**: Implementing the core 'Play Card' action and related state changes.
-- **[DEVPLAN_06_Combat_System.md](DEVPLAN_06_Combat_System.md)**: Implementing the basic combat phase steps (Attack, Block, Damage).
+- **[DEVPLAN_06_Combat_System.md](DEVPLAN_06_Combat_System.md)**: Implementing the basic combat phase steps (Attack, Block, Damage). (In Progress - Implementing WebSocket events)
 - **[DEVPLAN_07_Stack_Implementation.md](DEVPLAN_07_Stack_Implementation.md)**: Implementing the stack for spell/ability resolution and priority passing.
 - **[DEVPLAN_08_Basic_Keywords.md](DEVPLAN_08_Basic_Keywords.md)**: Implementing foundational keywords (Haste, Flying, Vigilance).
 - **[DEVPLAN_09_UI_Board_Layout.md](DEVPLAN_09_UI_Board_Layout.md)**: Setting up the basic React UI structure for the game board.

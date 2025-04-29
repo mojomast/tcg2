@@ -2,7 +2,21 @@ export type ManaColor = 'R' | 'U' | 'G' | 'B' | 'W';
 export type CardType = 'Creature' | 'Spell' | 'Enchantment' | 'Resource';
 export type Rarity = 'Common' | 'Uncommon' | 'Rare' | 'Mythic' | 'Legendary';
 export type SpellSpeed = 'Instant' | 'Sorcery';
-export type Keyword = 'Flying' | 'Haste' | 'Flash' | 'Deathtouch' | 'Lifelink' | 'Trample' | 'Vigilance' | 'First Strike'; // Add more as needed
+export type Keyword =
+    | 'Flying'
+    | 'Lifelink'
+    | 'Deathtouch'
+    | 'Trample'
+    | 'Haste'
+    | 'Indestructible'
+    | 'Protection' // Note: Need to specify what it's protected from (e.g., color, type)
+    | 'Menace'
+    | 'First Strike'
+    | 'Double Strike'
+    | 'Flash'
+    | 'Reach'
+    | 'Cannot Block'
+    | 'Vigilance';
 
 // Represents the cost of a card (e.g., { R: 1, colorless: 2 } for 1RR)
 export interface ManaCost {
