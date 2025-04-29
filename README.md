@@ -34,9 +34,19 @@ This fucking awesome design document outlines the comprehensive specifications f
 - Service Architecture
 - Deployment Considerations
 
+## Development Plans
+- [DEVPLAN_01_Project_Setup.md](./DEVPLAN_01_Project_Setup.md)
+- [DEVPLAN_02_Core_Game_Loop.md](./DEVPLAN_02_Core_Game_Loop.md)
+- [DEVPLAN_03_Card_Representation.md](./DEVPLAN_03_Card_Representation.md)
+- [DEVPLAN_04_Resource_System.md](./DEVPLAN_04_Resource_System.md)
+- [DEVPLAN_05_Action_Play_Card.md](./DEVPLAN_05_Action_Play_Card.md)
+- [DEVPLAN_06_Combat_System.md](./DEVPLAN_06_Combat_System.md)
+- [DEVPLAN_TESTING.md](./DEVPLAN_TESTING.md)
+
+## Getting Started
+
 ## About This Project
 This project aims to create a goddamn amazing digital card game with depth and replayability while maintaining accessibility for new players. The design emphasizes strategic gameplay, visual clarity, and technical scalability.
 
 ## How to Use This Document
 Each linked section contains detailed specifications for that aspect of the game. Cross-references between sections are included where relevant. Mermaid.js-compatible diagram descriptions are provided for visualization.
-
