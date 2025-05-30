@@ -29,7 +29,7 @@ const OpponentBattlefield: React.FC = () => {
         battlefieldCards.map((card: ServerBattlefieldCard) => (
           // CardComponent's `key` should be unique, instanceId is good.
           // `isTapped` prop will use `card.tapped` from ServerBattlefieldCard
-          <CardComponent card={card} key={card.instanceId} isTapped={card.tapped} />
+          <CardComponent card={card} key={card.instanceId} cardLocation="battlefield" isOwner={false} />
         ))
       ) : (
         <p>No cards on battlefield.</p>

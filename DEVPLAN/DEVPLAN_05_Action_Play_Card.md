@@ -2,18 +2,30 @@
 
 **Goal**: Implement the core game action of a player playing a card from their hand, including validation and state changes.
 
+**Current Status: 100% Complete** (Updated 2025-05-30T21:22)
+- WebSocket integration: ✅ COMPLETE
+- Core validation and state update: ✅ COMPLETE  
+- Target validation: ✅ COMPLETE
+
 ## Tasks
 
 ### Action Definition & Handling
-- [ ] Define the `play_card` WebSocket event structure (payload: `cardId`, optional `targets`).
-- [x] Create a handler function within the `GameEngine` or related module to process the `play_card` action (`playCard` method added).
+- [X] Define the `play_card` WebSocket event structure (payload: `cardId`, optional `targets`).
+    - **COMPLETED 2025-05-30T21:16:** WebSocket event listener added to `server.ts` lines 561-590
+    - **PAYLOAD:** `{ playerId: string, cardInstanceId: string, targets?: string[] }`
+    - **VALIDATION:** Player ID matching, comprehensive error handling
+- [X] Create a handler function within the `GameEngine` or related module to process the `play_card` action (`playCard` method added).
+    - **COMPLETED 2025-05-30T21:18:** Enhanced `GameEngine.playCard()` method returns boolean status
 
 ### Validation Logic
-- [x] Validate if the player has priority.
-- [x] Validate if the player actually has the specified `cardId` in their hand.
-- [x] Validate timing restrictions based on card type (e.g., Sorcery only in Main Phase, empty stack).
-- [x] Validate if the player can pay the card's mana cost using `canPayCost` from `DEVPLAN_04`.
-- [ ] Add basic target validation placeholder (if applicable).
+- [X] Validate if the player has priority.
+- [X] Validate if the player actually has the specified `cardId` in their hand.
+- [X] Validate timing restrictions based on card type (e.g., Sorcery only in Main Phase, empty stack).
+- [X] Validate if the player can pay the card's mana cost using `canPayCost` from `DEVPLAN_04`.
+- [X] Add basic target validation placeholder (if applicable).
+    - **COMPLETED 2025-05-30T21:22:** Comprehensive target validation system implemented
+    - **FEATURES:** Smart rules text parsing, target requirement detection, existence validation
+    - **METHODS:** `checkIfCardRequiresTargets()` and `validateBasicTargets()` in ActionManager
 *(Unit testing for these validation steps is substantially complete as part of ActionManager tests)*
 
 ### State Update Logic (On Success)
@@ -27,6 +39,11 @@
 *(Unit testing for these state updates, particularly placing items on stack, is substantially complete as part of ActionManager tests)*
 
 ### Integration & Logging
-- [ ] Integrate the `play_card` handler into the server's WebSocket event listener.
-- [x] Ensure action fails gracefully with appropriate error messages/events if validation fails (returns `false`, logs warnings/errors).
-- [x] Add logging for card plays (player, card name, success/failure).
+- [X] Integrate the `play_card` handler into the server's WebSocket event listener.
+    - **COMPLETED 2025-05-30T21:16:** Full WebSocket integration with error handling
+    - **FEATURES:** Player ID validation, success/failure broadcasting, error messages
+    - **ERROR HANDLING:** Graceful failures with specific error messages to clients
+- [X] Ensure action fails gracefully with appropriate error messages/events if validation fails (returns `false`, logs warnings/errors).
+- [X] Add logging for card plays (player, card name, success/failure).
+    - **ENHANCED:** Comprehensive logging throughout the play card pipeline
+    - **INCLUDES:** Target validation logs, mana payment logs, success/failure tracking

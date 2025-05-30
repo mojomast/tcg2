@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Provider } from 'react-redux'; // Provider will be here
 import store from './store/store';
 import GameBoard from './components/GameBoard';
@@ -31,6 +31,36 @@ type ViewName = 'main_menu' | 'play' | 'deckbuilder' | 'settings';
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewName>('main_menu');
 
+  // Define handleGameEvent outside useEffect so it's accessible in cleanup
+  const handleGameEvent = useCallback((eventData: GameEvent) => {
+    console.log(`[App.tsx] RAW game_event RECEIVED FROM SERVER: type=${eventData.type}, payload keys=${eventData.payload ? Object.keys(eventData.payload).join(',') : 'no payload'}`);
+    console.log('[App.tsx] Received game_event:', eventData);
+    switch (eventData.type) {
+      case EventType.GAME_READY:
+      case EventType.GAME_STATE_UPDATE:
+        if (eventData.payload && eventData.payload.gameState) {
+          store.dispatch(setGameStateFromServer(eventData.payload.gameState as ServerGameState));
+        } else {
+          console.warn(`[App.tsx] ${eventData.type} event received without gameState:`, eventData);
+        }
+        break;
+      case EventType.MANA_POOL_UPDATED:
+        if (eventData.payload && typeof eventData.payload.playerId === 'string' && eventData.payload.manaPool) {
+          store.dispatch(updateManaPool(eventData.payload as { playerId: string; manaPool: any }));
+        } else {
+          console.warn('[App.tsx] MANA_POOL_UPDATED event with invalid payload:', eventData);
+        }
+        break;
+      case EventType.PLAYER_JOINED:
+        console.log(`[App.tsx] 🎮 PLAYER JOINED:`, eventData.payload.message);
+        // You could dispatch a Redux action here to show a notification
+        break;
+      default:
+        console.log('[App.tsx] Unhandled game_event type:', eventData.type, eventData);
+        break;
+    }
+  }, []);
+
   useEffect(() => {
     console.log('[App.tsx] useEffect for socket connection is running.');
     
@@ -38,45 +68,11 @@ const App: React.FC = () => {
     const connectTimeout = setTimeout(() => {
       console.log('[App.tsx] Starting delayed socket connection...');
       // Establish WebSocket connection when the App component mounts
-      const socket = socketService.connect();
+      socketService.connect();
 
-      console.log('[App.tsx] Attaching "game_event" listener to socketService.'); // ADD THIS LOG
-      // Listen for game events from the server
-    const handleGameEvent = (eventData: GameEvent) => {
-      console.log(`[App.tsx] RAW game_event RECEIVED FROM SERVER: type=${eventData.type}, payload keys=${eventData.payload ? Object.keys(eventData.payload).join(',') : 'no payload'}`); // ADD THIS LINE
-      console.log('[App.tsx] Received game_event:', eventData); // Existing log
-      switch (eventData.type) {
-        case EventType.GAME_READY:
-        case EventType.GAME_STATE_UPDATE:
-          if (eventData.payload && eventData.payload.gameState) {
-            store.dispatch(setGameStateFromServer(eventData.payload.gameState as ServerGameState));
-          } else {
-            console.warn(`[App.tsx] ${eventData.type} event received without gameState:`, eventData);
-          }
-          break;
-        case EventType.MANA_POOL_UPDATED:
-          if (eventData.payload && typeof eventData.payload.playerId === 'string' && eventData.payload.manaPool) {
-            store.dispatch(updateManaPool(eventData.payload as { playerId: string; manaPool: any }));
-          } else {
-            console.warn('[App.tsx] MANA_POOL_UPDATED event with invalid payload:', eventData);
-          }
-          break;
-        case 'PLAYER_JOINED':
-          console.log(`[App.tsx] 🎮 PLAYER JOINED:`, eventData.payload.message);
-          // You could dispatch a Redux action here to show a notification
-          break;
-        default:
-          console.log('[App.tsx] Unhandled game_event type:', eventData.type, eventData);
-          break;
-      }
-    };
-    
-    // Ensure socket is available before attaching listener
-    if (socket) {
-        socketService.on('game_event', handleGameEvent);
-    } else {
-        console.error('[App.tsx] Socket not available when trying to attach game_event listener.');
-    }
+      console.log('[App.tsx] Attaching "game_event" listener to socketService.');
+      // Attach event listener
+      socketService.on('game_event', handleGameEvent);
 
     }, 1000); // 1 second delay to ensure page is loaded
     
@@ -86,7 +82,7 @@ const App: React.FC = () => {
       socketService.off('game_event', handleGameEvent);
       socketService.disconnect();
     };
-  }, []); // Empty dependency array: runs once on mount, cleans up on unmount
+  }, [handleGameEvent]);
 
   const navigateTo = (view: ViewName) => {
     setCurrentView(view);

@@ -37,6 +37,9 @@ export class StateManager {
                     player.hasLost = true;
                     actionTaken = true;
                     continueChecking = true; // Re-check after change
+                    
+                    // Trigger game end check for life depletion
+                    this.engine.checkGameEnd('life_depletion', player.playerId);
                 }
             });
             if (continueChecking) continue; // Restart checks if an action occurred
@@ -94,17 +97,12 @@ export class StateManager {
         } // End while loop
 
         // Check for game win/loss conditions after all SBAs resolve
-        if (!this.gameState.winner) { // Only check if a winner hasn't been determined yet
+        // This is now handled by GameEngine.checkGameEnd() calls above, but keep as backup
+        if (!this.gameState.gameEnded) { // Only check if game hasn't ended yet
             const activePlayers = this.gameState.players.filter(p => !p.hasLost);
-            if (activePlayers.length === 1) {
-                this.gameState.winner = activePlayers[0].playerId;
-                console.log(`Game Over: Player ${this.gameState.winner} wins!`);
-                // TODO: Emit game end event
-            } else if (activePlayers.length === 0) {
-                // This case (draw) might be handled by specific rules, e.g., if both players lose simultaneously
-                console.log("Game Over: Draw! (or simultaneous loss)");
-                this.gameState.winner = 'draw'; // Indicate a draw explicitly
-                // TODO: Handle draw condition properly
+            if (activePlayers.length <= 1) {
+                // Trigger final game end check via GameEngine
+                this.engine.checkGameEnd('state_based_actions');
             }
         }
 

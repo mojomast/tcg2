@@ -21,3 +21,18 @@ export class DeckSelectionMissingError extends Error {
         Object.setPrototypeOf(this, DeckSelectionMissingError.prototype);
     }
 }
+
+export class DeckValidationError extends Error {
+    public deckId: string;
+    public playerId: string | null;
+    public validationErrors: string[];
+
+    constructor(message: string, deckId: string, validationErrors: string[], playerId: string | null = null) {
+        super(message);
+        this.name = 'DeckValidationError';
+        this.deckId = deckId;
+        this.playerId = playerId;
+        this.validationErrors = validationErrors;
+        Object.setPrototypeOf(this, DeckValidationError.prototype);
+    }
+}

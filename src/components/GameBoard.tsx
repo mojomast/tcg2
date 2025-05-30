@@ -15,16 +15,21 @@ import StackZone from './StackZone.js';
 import PhaseDisplay from './PhaseDisplay.js';
 import ActionControls from './ActionControls.js';
 import ManaDisplay from './ManaDisplay'; // Import ManaDisplay
-import { RootState } from '../store/store.js'; 
+import GameOverModal from './GameOverModal'; // Import GameOverModal
+import { RootState } from '../store/store.js';
 import { setLocalPlayerId, setGameStateFromServer } from '../store/slices/gameSlice.js';
 import { EventType, GameEvent, GameState as ServerGameState } from '../interfaces/gameState.js';
 import socketService from '../services/socketService.js';
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from '../config/constants.js';
+import DeckSelectionModal from './DeckSelectionModal.js';
 
 const GameBoard: React.FC = () => {
   const dispatch = useDispatch();
-  const localPlayerId = useSelector((state: RootState) => state.game.localPlayerId);
+  const gameState = useSelector((state: RootState) => state.game);
+  const localPlayerId = gameState.localPlayerId;
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(TEST_PLAYER_1_ID);
+  const [showDeckSelection, setShowDeckSelection] = useState(false);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
 
   // useEffect to log when localPlayerId changes, useful for debugging UI state
   useEffect(() => {
@@ -33,10 +38,23 @@ const GameBoard: React.FC = () => {
 
   const handleJoinGame = () => {
     if (selectedPlayerId) {
-      dispatch(setLocalPlayerId(selectedPlayerId));
-      socketService.emitJoinGame(TEST_GAME_ID, selectedPlayerId);
-      console.log(`Attempting to join game ${TEST_GAME_ID} as ${selectedPlayerId}`);
+      // Show deck selection modal before joining game
+      setShowDeckSelection(true);
     }
+  };
+
+  const handleDeckSelected = (deckId: string) => {
+    setSelectedDeckId(deckId);
+    setShowDeckSelection(false);
+    
+    // Now join the game with the selected deck
+    dispatch(setLocalPlayerId(selectedPlayerId));
+    socketService.emitJoinGame(TEST_GAME_ID, selectedPlayerId);
+    console.log(`Attempting to join game ${TEST_GAME_ID} as ${selectedPlayerId} with deck ${deckId}`);
+  };
+
+  const handleDeckSelectionCancel = () => {
+    setShowDeckSelection(false);
   };
 
   if (!localPlayerId) {
@@ -59,6 +77,14 @@ const GameBoard: React.FC = () => {
           </button>
         </div>
         <p style={{ marginTop: '20px' }}>Open another tab or incognito window, select the other Player ID, and click "Join Game" to test two players.</p>
+        
+        <DeckSelectionModal 
+          isOpen={showDeckSelection}
+          onSelectDeck={handleDeckSelected}
+          onCancel={handleDeckSelectionCancel}
+          playerId={selectedPlayerId}
+          availableDecks={[]}
+        />
       </div>
     );
   }
@@ -112,6 +138,19 @@ const GameBoard: React.FC = () => {
       <div className="action-controls-area">
         <ActionControls />
       </div>
+      
+      {/* Game Over Modal */}
+      <GameOverModal 
+        isVisible={gameState.gameEnded || false}
+        onPlayAgain={() => {
+          console.log('Play Again clicked - implement game restart logic');
+          // TODO: Implement play again functionality
+        }}
+        onReturnToMenu={() => {
+          console.log('Return to Menu clicked - implement menu navigation');
+          // TODO: Implement return to menu functionality
+        }}
+      />
     </div>
   );
 };

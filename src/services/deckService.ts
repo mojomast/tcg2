@@ -2,6 +2,7 @@
 // TODO: Implement actual deck loading and management logic
 
 import { Card } from '../interfaces/card.js';
+import { GameState, PlayerId } from '../interfaces/gameState.js';
 import { db } from '../db/database.js'; // Import the database instance
 import { DeckNotFoundError } from '../errors/customErrors.js';
 
@@ -130,6 +131,117 @@ const DeckService = {
     }
     console.log(`[DeckService] Deck ${deckId} constructed with ${actualDeck.length} cards.`);
     return actualDeck;
+  },
+
+  /**
+   * Validates a deck according to standard format rules.
+   * @param deckList The deck to validate
+   * @param cardDatabase Optional card database for additional validation
+   * @returns Validation result with detailed error messages
+   */
+  validateDeck(deckList: DeckList, cardDatabase?: Map<string, Card>): { valid: boolean, errors: string[] } {
+    console.log(`[DeckService] Validating deck: ${deckList.name} (${deckList.deckId})`);
+    const errors: string[] = [];
+    
+    // Calculate total card count
+    const totalCards = deckList.cards.reduce((sum, entry) => sum + entry.quantity, 0);
+    
+    // Check 1: Minimum deck size (60 cards for standard format)
+    if (totalCards < 60) {
+      errors.push(`Deck has ${totalCards} cards but requires minimum 60 cards for standard format.`);
+    }
+    
+    // Check 2: Maximum 4 copies of any non-basic land card
+    const cardCounts = new Map<string, number>();
+    for (const entry of deckList.cards) {
+      cardCounts.set(entry.cardId, entry.quantity);
+      
+      // Skip basic lands (they have unlimited copies)
+      const isBasicLand = entry.cardId.startsWith('basic-') || 
+                          entry.cardId.includes('-basic-') ||
+                          (cardDatabase && cardDatabase.get(entry.cardId)?.name?.match(/^(Plains|Island|Swamp|Mountain|Forest)$/));
+      
+      if (!isBasicLand && entry.quantity > 4) {
+        const cardName = cardDatabase?.get(entry.cardId)?.name || entry.cardId;
+        errors.push(`Card '${cardName}' has ${entry.quantity} copies but maximum allowed is 4.`);
+      }
+    }
+    
+    // Check 3: All card IDs exist in card database (if provided)
+    if (cardDatabase) {
+      for (const entry of deckList.cards) {
+        if (!cardDatabase.has(entry.cardId)) {
+          errors.push(`Card ID '${entry.cardId}' not found in card database.`);
+        }
+      }
+    }
+    
+    // Check 4: No negative quantities
+    const negativeQuantities = deckList.cards.filter(entry => entry.quantity <= 0);
+    if (negativeQuantities.length > 0) {
+      negativeQuantities.forEach(entry => {
+        errors.push(`Card '${entry.cardId}' has invalid quantity: ${entry.quantity}`);
+      });
+    }
+    
+    const isValid = errors.length === 0;
+    
+    if (isValid) {
+      console.log(`[DeckService] Deck '${deckList.name}' validation passed. ${totalCards} cards total.`);
+    } else {
+      console.warn(`[DeckService] Deck '${deckList.name}' validation failed with ${errors.length} errors:`);
+      errors.forEach((error, index) => {
+        console.warn(`  ${index + 1}. ${error}`);
+      });
+    }
+    
+    return { valid: isValid, errors };
+  },
+
+  /**
+   * Draws a card from the top of a player's library to their hand.
+   * Updates deck_count and handles empty deck scenarios.
+   * This is a wrapper around GameEngine.playerDrawCard() for external use.
+   * @param gameState The current game state
+   * @param playerId The player drawing the card
+   * @returns true if card was drawn successfully, false if library is empty
+   */
+  drawCard(gameState: GameState, playerId: PlayerId): boolean {
+    console.log(`[DeckService] Draw card requested for player ${playerId}`);
+    
+    const playerState = gameState.players.find(p => p.playerId === playerId);
+    if (!playerState) {
+      console.error(`[DeckService] Player ${playerId} not found in game state.`);
+      return false;
+    }
+
+    // Check if library is empty before attempting draw
+    if (playerState.library.length === 0) {
+      console.warn(`[DeckService] Player ${playerId} attempted to draw from empty library.`);
+      return false;
+    }
+
+    // Perform the card draw (move from library to hand)
+    const cardToDrawInstanceId = playerState.library.shift();
+    if (cardToDrawInstanceId) {
+      playerState.hand.push(cardToDrawInstanceId);
+      
+      // Update deck_count to reflect the change
+      playerState.deck_count = playerState.library.length;
+      
+      // Update the card's zone in game objects
+      const cardObject = gameState.gameObjects[cardToDrawInstanceId];
+      if (cardObject) {
+        cardObject.currentZone = 'hand';
+      }
+      
+      console.log(`[DeckService] Player ${playerId} drew card ${cardToDrawInstanceId}. Hand: ${playerState.hand.length}, Library: ${playerState.library.length}`);
+      return true;
+    }
+    
+    // This shouldn't happen if library.length check passed, but safeguard
+    console.error(`[DeckService] Failed to draw card for player ${playerId} despite non-empty library.`);
+    return false;
   }
 };
 

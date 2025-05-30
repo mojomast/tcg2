@@ -1,4 +1,5 @@
 import { GameState, PlayerId } from '../interfaces/gameState';
+import { shuffleArray } from '../utils/arrayUtils.js';
 
 export class GameInitializer {
 
@@ -9,24 +10,36 @@ export class GameInitializer {
     }
 
     private shuffleDeck(gameState: GameState, playerId: PlayerId): void {
-        console.log(`Placeholder: Shuffling deck for player ${playerId}`);
+        console.log(`[GameInitializer] Shuffling deck for player ${playerId}`);
         const playerState = gameState.players.find(p => p.playerId === playerId);
         if (playerState) {
-            // Simple array shuffle placeholder
-            playerState.library.sort(() => Math.random() - 0.5);
+            // Use proper Fisher-Yates shuffle algorithm
+            shuffleArray(playerState.library);
+            console.log(`[GameInitializer] Deck shuffled for player ${playerId}. Library size: ${playerState.library.length}`);
         }
     }
 
     private drawOpeningHand(gameState: GameState, playerId: PlayerId, handSize: number = 7): void {
-        console.log(`Placeholder: Drawing opening hand for player ${playerId}`);
+        console.log(`[GameInitializer] Drawing opening hand of ${handSize} cards for player ${playerId}`);
         const playerState = gameState.players.find(p => p.playerId === playerId);
         if (playerState) {
             for (let i = 0; i < handSize && playerState.library.length > 0; i++) {
                 const drawnCardId = playerState.library.shift(); // Removes from library
                 if (drawnCardId) {
                     playerState.hand.push(drawnCardId);
+                    
+                    // Update the card's zone in game objects
+                    const cardObject = gameState.gameObjects[drawnCardId];
+                    if (cardObject) {
+                        cardObject.currentZone = 'hand';
+                    }
                 }
             }
+            
+            // Update deck count
+            playerState.deck_count = playerState.library.length;
+            
+            console.log(`[GameInitializer] Player ${playerId} drew opening hand. Hand: ${playerState.hand.length}, Library: ${playerState.library.length}`);
         }
     }
 

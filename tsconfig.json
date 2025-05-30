@@ -6,7 +6,7 @@
     "target": "esnext",                                  /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
     "lib": ["esnext", "dom"],                                        /* Specify a set of bundled library declaration files that describe the target runtime environment. */
     "jsx": "react-jsx",                                /* Specify JSX code generation: 'preserve', 'react-native', 'react', or 'react-jsx'. */
-    "types": ["vite/client"],                           /* Specify type package names to be included without being referenced in a source file. */
+    "types": ["vite/client", "jest"],                           /* Specify type package names to be included without being referenced in a source file. */
 
     /* Modules */
     "module": "esnext",                                /* Specify what module code is generated. */

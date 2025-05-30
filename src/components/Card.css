@@ -10,14 +10,24 @@
   justify-content: space-between;
   font-family: Arial, sans-serif;
   font-size: 0.8em;
-  box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: transform 0.3s ease-in-out, border-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; /* Added box-shadow to transition */
   margin: 5px;
-  transition: transform 0.2s ease-in-out;
+  position: relative; /* For z-index stacking on hover */
 }
 
 .card-component.tapped {
-  transform: rotate(90deg) translateY(30px); /* Example tapped style */
-  /* Adjust transform origin if needed, or use different visual cue */
+  transform: rotate(90deg);
+  /* Adjust margins when tapped to try and prevent overlap,
+     this might need fine-tuning based on card size and container */
+  margin-left: 30px; /* Example: shift right when rotated */
+  margin-right: 30px;
+  border-color: orange; /* Keep border color change or remove if rotation is enough */
+}
+
+.card-component.summoning-sickness {
+  outline: 2px solid skyblue;
+  outline-offset: -2px; /* To keep the outline inside the card border */
 }
 
 .card-header {
@@ -43,6 +53,51 @@
   border-radius: 5px;
   margin-left: 5px;
   white-space: nowrap;
+}
+
+.card-attachments-indicator {
+  font-size: 0.9em; /* Adjust size relative to other header elements */
+  background-color: #e0e0e0; /* Light grey, similar to card-cost background */
+  color: #333;
+  padding: 1px 5px;
+  border-radius: 8px; /* Pill shape */
+  margin: 0 5px; /* Some spacing around it */
+  white-space: nowrap;
+  line-height: 1.2; /* Align with text in name/cost */
+}
+
+/* Card Background Colors based on Color Identity */
+.card-bg-white {
+  background-color: #f8f6f0; /* Light creamy white */
+}
+.card-bg-blue {
+  background-color: #e0f0f8; /* Light sky blue */
+}
+.card-bg-black {
+  background-color: #d8d8d8; /* Light grey for black identity (true black bg is hard) */
+}
+.card-bg-red {
+  background-color: #f8e0e0; /* Light pink/red */
+}
+.card-bg-green {
+  background-color: #e0f0e0; /* Light mint green */
+}
+.card-bg-multicolor {
+  background-image: linear-gradient(to bottom right, #f0e68c, #ffd700); /* Goldish gradient */
+}
+.card-bg-colorless {
+  background-color: #efefef; /* Very light grey, for artifacts or colorless cards */
+}
+
+.card-power-toughness.modified-pt {
+  color: #28a745; /* Green color for modified P/T */
+  font-weight: bold;
+}
+
+.card-component:hover {
+  transform: scale(1.15) translateY(-10px); /* Scale up and slightly lift */
+  z-index: 10; /* Ensure hovered card is on top */
+  box-shadow: 0 8px 16px rgba(0,0,0,0.3); /* Enhance shadow on hover */
 }
 
 .card-image-container {
@@ -86,4 +141,34 @@
   border-top: 1px solid #eee;
   padding-top: 5px;
   margin-top: auto; /* Push to bottom if rules text is short */
+}
+
+.card-counters {
+  /* Positioned to appear above P/T or in a designated area */
+  /* This might need adjustment based on overall card layout */
+  margin-top: 4px; /* Space from rules text or image */
+  margin-bottom: 4px; /* Space before P/T */
+  display: flex;
+  flex-direction: column; /* Stack multiple counter types */
+  align-items: flex-start; /* Align badges to the left */
+  gap: 2px;
+}
+
+.counter-badge {
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 0.75em; /* Slightly larger for readability */
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  line-height: 1; /* Ensure consistent height */
+}
+
+.card--animating-out {
+  opacity: 0;
+  transform: scale(0.8) translateY(20px);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+  /* Consider z-index if it needs to animate 'under' or 'over' other elements during transition */
+  /* position: absolute; /* Be cautious with position: absolute, it can affect layout. */
+  /* If used, ensure the original space doesn't collapse abruptly. */
 }

@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction, ThunkAction, Action } from '@reduxjs/toolkit';
 import {
   PlayerId as ServerPlayerId,
   GameObjectId as ServerGameObjectId,
@@ -15,6 +15,16 @@ import {
 import { Card } from '../../interfaces/card.js';
 import { v4 as uuidv4 } from 'uuid'; 
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from '../../config/constants'; 
+import socketService from '../../services/socketService';
+import { RootState } from '../store'; // For AppThunk type
+
+// AppThunk type definition
+export type AppThunk<ReturnType = void> = ThunkAction<
+  ReturnType,
+  RootState,
+  unknown,
+  Action<string>
+>;
 
 // Client-side representation of PlayerState
 export interface PlayerState {
@@ -49,6 +59,10 @@ export interface GameState {
   gameLog: string[];
   winner: string | null;
   consecutivePriorityPasses: number;
+  attackers: ServerGameState['attackers'];
+  blockers: ServerGameState['blockers'];
+  gameEnded: boolean; // Add missing gameEnded property
+  startingPlayerId: string | null; // Add missing startingPlayerId property
 }
 
 const initialPlayerStatePlaceholder: PlayerState = {
@@ -86,6 +100,10 @@ const initialState: GameState = {
   gameLog: [],
   winner: null,
   consecutivePriorityPasses: 0,
+  attackers: {},
+  blockers: {},
+  gameEnded: false, // Initialize gameEnded to false
+  startingPlayerId: null, // Initialize startingPlayerId to null
 };
 
 const createInitialBattlefieldCard = (
@@ -140,7 +158,11 @@ const gameSlice = createSlice({
       state.gameLog = serverState.gameLog;
       state.winner = serverState.winner ?? null;
       state.consecutivePriorityPasses = serverState.consecutivePriorityPasses ?? 0;
+      state.attackers = { ...(serverState.attackers || {}) };
+      state.blockers = { ...(serverState.blockers || {}) };
       state.gameObjects = { ...serverState.gameObjects };
+      state.gameEnded = serverState.gameEnded ?? false;
+      state.startingPlayerId = serverState.startingPlayerId ?? null;
 
       // Map server players directly to client state players array
       // The order of players in state.players will now match serverState.players
@@ -227,3 +249,14 @@ export const {
 } = gameSlice.actions;
 
 export default gameSlice.reducer;
+
+// Thunks for WebSocket actions
+export const playCardViaSocket = (payload: { cardId: string }): AppThunk => async dispatch => {
+  // Here, you might want to add some client-side validation or state updates immediately,
+  // or wait for the server to confirm the action via a broadcasted game state update.
+  socketService.emit('play_card', payload);
+};
+
+export const playResourceViaSocket = (payload: { cardId: string }): AppThunk => async dispatch => {
+  socketService.emit('play_resource', payload);
+};

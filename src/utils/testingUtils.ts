@@ -108,6 +108,7 @@ export function createInitialGameState(player1Id: PlayerId, player2Id: PlayerId)
         blockers: {},
         gameLog: [],
         winner: undefined,
+        gameEnded: false,
     };
 }
 
@@ -186,5 +187,6 @@ export function createMockGameState(player1Id: PlayerId = 'player1', player2Id: 
         blockers: {},
         gameLog: [],
         winner: undefined,
+        gameEnded: false,
     };
 }

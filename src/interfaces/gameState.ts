@@ -98,6 +98,10 @@ export interface GameState {
   blockers: { [blockerId: GameObjectId]: GameObjectId }; // Map blocker ID to attacker ID it's blocking
   gameLog: string[]; // Simple log for now
   winner?: PlayerId; // Set when a player wins the game
+  gameEnded: boolean; // Flag indicating if the game has ended
+  loser?: PlayerId; // Player who lost the game
+  endReason?: string; // Reason for game end (e.g., 'life_depletion', 'deck_depletion')
+  endTime?: Date; // Timestamp when game ended
   // Optional fields for tracking effects during resolution
   pendingDamage?: { [objectId: GameObjectId]: { damage: number; sourceId: GameObjectId; isCombat: boolean; deathtouch?: boolean } };
   pendingLifeGain?: { [playerId: PlayerId]: number };
@@ -154,6 +158,7 @@ export enum EventType {
   GAME_STATE_UPDATE = 'game_state_update', // When the overall game state is updated
   CARD_DISCARDED = 'CARD_DISCARDED', // When a card is discarded
   TURN_PASSED = 'TURN_PASSED', // When a player passes their turn
+  PLAYER_JOINED = 'PLAYER_JOINED', // When a player joins the game
   // Add more event types as needed (e.g., PLAYER_PRIORITY_CHANGED, TURN_CHANGED, COMBAT_DECLARED)
 }
 

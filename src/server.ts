@@ -16,7 +16,7 @@ import cardService from './services/cardService.js'; // Import CardService
 import path from 'path'; // Import path module
 import { fileURLToPath } from 'url'; // Added for __dirname
 import { initializeDatabase, getAllDecks, DeckBasicInfo } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo
-import { DeckNotFoundError, DeckSelectionMissingError } from './errors/customErrors.js';
+import { DeckNotFoundError, DeckSelectionMissingError, DeckValidationError } from './errors/customErrors.js';
 
 // --- Define __filename and __dirname ---
 const __filename = fileURLToPath(import.meta.url);
@@ -253,7 +253,7 @@ async function attemptToStartGame(
       gameSuccessfullyCreated = true;
       break; // Success
     } catch (error) {
-      if ((error instanceof DeckNotFoundError || error instanceof DeckSelectionMissingError) && error.playerId) {
+      if ((error instanceof DeckNotFoundError || error instanceof DeckSelectionMissingError || error instanceof DeckValidationError) && error.playerId) {
         const erroredPlayerId = error.playerId;
         const erroredPlayerInfo = playersInfo.find(p => p.id === erroredPlayerId);
         if (!erroredPlayerInfo) {
@@ -265,7 +265,19 @@ async function attemptToStartGame(
         console.log(`[server] Game creation failed for player ${erroredPlayerId} in game ${gameId}: ${(error as Error).message}.`);
         try {
           const availableDecks = getAllDecks(); // Fetch current list of all decks
-          const problematicDeckId = (error instanceof DeckNotFoundError) ? error.deckId : null;
+          let problematicDeckId: string | null = null;
+          
+          if (error instanceof DeckNotFoundError) {
+            problematicDeckId = error.deckId;
+          } else if (error instanceof DeckValidationError) {
+            // For validation errors, also identify the problematic deck
+            problematicDeckId = error.deckId;
+            console.error(`[server] Deck validation errors for ${error.deckId}:`);
+            error.validationErrors.forEach((validationError, index) => {
+              console.error(`  ${index + 1}. ${validationError}`);
+            });
+          }
+          
           const newDeckId = await promptForDeckSelection(erroredPlayerInfo.socket, erroredPlayerId, problematicDeckId, availableDecks);
           playerDeckSelections[erroredPlayerId] = newDeckId;
           console.log(`[server] Player ${erroredPlayerId} selected new deck: ${newDeckId}. Retrying game creation.`);
@@ -420,16 +432,72 @@ app.get('/api/cards', (req: Request, res: Response): void => {
   }
 });
 
-// API endpoint to get all decks from the database
-app.get('/api/decks', (req: Request, res: Response): void => {
-  try {
-    const decks: DeckBasicInfo[] = getAllDecks();
-    res.json(decks); // Send the array of decks
-  } catch (error) {
-    console.error('Error fetching all decks:', error);
-    res.status(500).json({ message: 'Failed to fetch decks from the database.' });
-  }
-});
+    // API endpoint to get all decks from the database
+    app.get('/api/decks', (req: Request, res: Response): void => {
+      try {
+        const decks: DeckBasicInfo[] = getAllDecks();
+        res.json(decks); // Send the array of decks
+      } catch (error) {
+        console.error('Error fetching all decks:', error);
+        res.status(500).json({ message: 'Failed to fetch decks from the database.' });
+      }
+    });
+
+    // API endpoint to validate a deck
+    app.post('/api/validate-deck', (req: Request, res: Response): void => {
+      try {
+        const { deckId } = req.body;
+        
+        if (!deckId || typeof deckId !== 'string') {
+          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          return;
+        }
+        
+        console.log(`[server]: Validating deck ${deckId}`);
+        
+        // Fetch the deck from the database
+        deckService.fetchDeck(deckId)
+          .then(deckList => {
+            // Get card database for validation
+            const cardArray = cardService.getAllCards();
+            const cardDatabase = new Map(cardArray.map(card => [card.id, card]));
+            
+            // Validate the deck
+            const validationResult = deckService.validateDeck(deckList, cardDatabase);
+            
+            console.log(`[server]: Deck ${deckId} validation result: ${validationResult.valid ? 'VALID' : 'INVALID'}`);
+            
+            res.json({
+              deckId: deckId,
+              deckName: deckList.name,
+              valid: validationResult.valid,
+              errors: validationResult.errors
+            });
+          })
+          .catch(error => {
+            console.error(`[server]: Error during deck validation for ${deckId}:`, error);
+            
+            if (error instanceof DeckNotFoundError) {
+              res.status(404).json({ 
+                message: `Deck with ID '${deckId}' not found.`,
+                deckId: deckId,
+                valid: false,
+                errors: [`Deck '${deckId}' does not exist.`]
+              });
+            } else {
+              res.status(500).json({ 
+                message: 'Failed to validate deck due to internal error.',
+                deckId: deckId,
+                valid: false,
+                errors: ['Internal server error during validation.']
+              });
+            }
+          });
+      } catch (error) {
+        console.error('[server]: Error in validate-deck endpoint:', error);
+        res.status(500).json({ message: 'Failed to validate deck.' });
+      }
+    });
 
     // --- REAL GAME ENGINE INITIALIZATION ---
     console.log('[server]: Initializing real GameEngine for gameplay.');
@@ -446,8 +514,8 @@ app.get('/api/decks', (req: Request, res: Response): void => {
         { id: TEST_PLAYER_2_ID, socket: null, initialDeckId: 'defaultDeckP2' }  // No real socket for test player
       ];
 
-      const gameExternalEventCallback = (eventType: EventType, eventData: any, gameIdFromEngine: string) => {
-        const gameIdToBroadcast = gameIdFromEngine; // Use the gameId passed by the GameEngine
+      const gameExternalEventCallback = (eventType: EventType, eventData: any) => {
+        const gameIdToBroadcast = testGameId; // Use the testGameId for this test game
 
         if (!gameIdToBroadcast) {
           // This should ideally not be reached if GameEngine always provides a valid gameId.
@@ -546,6 +614,33 @@ app.get('/api/decks', (req: Request, res: Response): void => {
         }
       });
 
+      socket.on('play_card', (data: { playerId: string, cardInstanceId: string, targets?: string[] }) => {
+        console.log(`[server.ts]: Received play_card from ${data.playerId} for card ${data.cardInstanceId}`);
+        
+        // Validate player ID matches socket
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for play_card. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+        
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine) {
+          try {
+            gameEngine.playCard(data.playerId, data.cardInstanceId, data.targets);
+            // If no exception was thrown, the action was successful
+            broadcastGameStateUpdate(gameEngine);
+            console.log(`[server.ts]: Card play successful for ${data.cardInstanceId}, game state broadcasted.`);
+          } catch (error) {
+            console.error(`[server.ts]: Error during play_card for player ${data.playerId}:`, error);
+            socket.emit('action_error', { message: 'Card play action failed due to internal error.' });
+          }
+        } else {
+          console.error(`[server.ts]: Game engine not found for socket ${socket.id} during play_card.`);
+          socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
       socket.on('pass_turn', (data: { playerId: string }) => {
         console.log(`[server.ts]: Received pass_turn from ${data.playerId}`);
         const gameEngine = getGameEngineForSocket(socket);
@@ -561,6 +656,98 @@ app.get('/api/decks', (req: Request, res: Response): void => {
         } else {
             console.error(`[server.ts]: Game engine or turn manager not found for socket ${socket.id} during pass_turn.`);
             socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
+      // Combat Actions
+      socket.on('declare_attackers', (data: { playerId: string, attackerInstanceIds: string[] }) => {
+        console.log(`[server.ts]: Received declare_attackers from ${data.playerId} with attackers: ${data.attackerInstanceIds.join(', ')}`);
+        
+        // Validate player ID matches socket
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for declare_attackers. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+        
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine && gameEngine.combatManager) {
+          try {
+            // Convert array to attackers map (attacker -> target player)
+            const attackers: { [attackerId: string]: string } = {};
+            const opponentId = gameEngine.getOpponentId(data.playerId);
+            
+            data.attackerInstanceIds.forEach(attackerId => {
+              attackers[attackerId] = opponentId;
+            });
+            
+            gameEngine.combatManager.declareAttackers(data.playerId, attackers);
+            // If no exception was thrown, the action was successful
+            broadcastGameStateUpdate(gameEngine);
+            console.log(`[server.ts]: Declare attackers successful, game state broadcasted.`);
+          } catch (error) {
+            console.error(`[server.ts]: Error during declare_attackers for player ${data.playerId}:`, error);
+            socket.emit('action_error', { message: 'Declare attackers action failed due to internal error.' });
+          }
+        } else {
+          console.error(`[server.ts]: Game engine or combat manager not found for socket ${socket.id} during declare_attackers.`);
+          socket.emit('action_error', { message: 'Game not found or combat system not initialized.' });
+        }
+      });
+
+      socket.on('declare_blockers', (data: { playerId: string, blockerAssignments: { [blockerId: string]: string } }) => {
+        console.log(`[server.ts]: Received declare_blockers from ${data.playerId} with blockers:`, data.blockerAssignments);
+        
+        // Validate player ID matches socket
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for declare_blockers. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+        
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine && gameEngine.combatManager) {
+          try {
+            gameEngine.combatManager.declareBlockers(data.playerId, data.blockerAssignments);
+            // If no exception was thrown, the action was successful
+            broadcastGameStateUpdate(gameEngine);
+            console.log(`[server.ts]: Declare blockers successful, game state broadcasted.`);
+          } catch (error) {
+            console.error(`[server.ts]: Error during declare_blockers for player ${data.playerId}:`, error);
+            socket.emit('action_error', { message: 'Declare blockers action failed due to internal error.' });
+          }
+        } else {
+          console.error(`[server.ts]: Game engine or combat manager not found for socket ${socket.id} during declare_blockers.`);
+          socket.emit('action_error', { message: 'Game not found or combat system not initialized.' });
+        }
+      });
+
+      socket.on('play_resource', (data: { playerId: string, cardInstanceId: string }) => {
+        console.log(`[server.ts]: Received play_resource from ${data.playerId} for card ${data.cardInstanceId}`);
+        
+        // Validate player ID matches socket
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for play_resource. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+        
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine) {
+          try {
+            // Resource cards are handled by the same playCard method in ActionManager
+            // The ActionManager will detect if it's a resource and handle it accordingly
+            gameEngine.playCard(data.playerId, data.cardInstanceId);
+            // If no exception was thrown, the action was successful
+            broadcastGameStateUpdate(gameEngine);
+            console.log(`[server.ts]: Play resource successful for ${data.cardInstanceId}, game state broadcasted.`);
+          } catch (error) {
+            console.error(`[server.ts]: Error during play_resource for player ${data.playerId}:`, error);
+            socket.emit('action_error', { message: 'Play resource action failed due to internal error.' });
+          }
+        } else {
+          console.error(`[server.ts]: Game engine not found for socket ${socket.id} during play_resource.`);
+          socket.emit('action_error', { message: 'Game not found or not initialized.' });
         }
       });
 

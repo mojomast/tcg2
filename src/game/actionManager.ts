@@ -148,12 +148,24 @@ export class ActionManager {
             console.log(`ActionManager: Player ${playerId} paid cost for ${baseCard.name}.`);
         }
 
-        // 7. Validate Targets (Placeholder)
-        // TODO: Implement target validation based on baseCard.targetingRequirements and provided targets.
-        //       If targets are invalid, throw an error. This needs to happen BEFORE costs are paid or card is moved.
-        //       For now, we assume targets are valid if provided.
+        // 7. Validate Targets (Basic Implementation)
+        const requiresTargets = this.checkIfCardRequiresTargets(baseCard);
+        
+        if (requiresTargets && (!targets || targets.length === 0)) {
+            throw new Error(`ActionManager: Card ${baseCard.name} requires targets but none were provided.`);
+        }
+        
+        if (!requiresTargets && targets && targets.length > 0) {
+            console.log(`ActionManager: Card ${baseCard.name} does not require targets, ignoring provided targets.`);
+            targets = undefined; // Clear targets for non-targeted spells
+        }
+        
         if (targets && targets.length > 0) {
-            console.log(`ActionManager: Card ${baseCard.name} played with targets: ${targets.join(', ')} (Target validation pending).`);
+            const targetValidation = this.validateBasicTargets(baseCard, targets);
+            if (!targetValidation.valid) {
+                throw new Error(`ActionManager: Target validation failed for ${baseCard.name}: ${targetValidation.error}`);
+            }
+            console.log(`ActionManager: Target validation passed for ${baseCard.name} with ${targets.length} target(s).`);
         }
 
         // 8. Move Card to Stack
@@ -189,6 +201,75 @@ export class ActionManager {
         // The player who took the action gets priority again
         this.gameState.priorityPlayerId = playerId;
         console.log(`ActionManager: Priority set to player ${playerId}. Consecutive passes reset.`);
+    }
+
+    /**
+     * Checks if a card requires targets based on its rules text.
+     * This is a simple implementation - more sophisticated parsing may be needed later.
+     * @param card The card to check
+     * @returns true if the card requires targets
+     */
+    private checkIfCardRequiresTargets(card: Card): boolean {
+        // Simple rules for determining if a card requires targets
+        
+        // Creatures and Resources never require targets
+        if (card.type === 'Creature' || card.type === 'Resource' || card.type === 'Land') {
+            return false;
+        }
+        
+        // Check rules text for targeting keywords
+        const rulesText = card.rulesText?.toLowerCase() || card.text?.toLowerCase() || '';
+        
+        // Look for targeting language
+        const targetingKeywords = [
+            'target',
+            'chosen',
+            'destroy target',
+            'deal damage to target',
+            'target creature',
+            'target player'
+        ];
+        
+        return targetingKeywords.some(keyword => rulesText.includes(keyword));
+    }
+
+    /**
+     * Performs basic target validation.
+     * @param card The card being played
+     * @param targets The provided targets
+     * @returns Validation result with success/failure and error message
+     */
+    private validateBasicTargets(card: Card, targets: GameObjectId[]): { valid: boolean, error?: string } {
+        // Basic validation rules
+        
+        // Most targeted spells require exactly 1 target
+        if (targets.length !== 1) {
+            return {
+                valid: false,
+                error: `Expected 1 target, but ${targets.length} were provided.`
+            };
+        }
+        
+        const targetId = targets[0];
+        
+        // Check if target exists in game (basic existence check)
+        const targetExists = this.gameState.gameObjects[targetId] !== undefined ||
+                           this.gameState.players.some(p => p.playerId === targetId);
+        
+        if (!targetExists) {
+            return {
+                valid: false,
+                error: `Target ${targetId} does not exist in the game.`
+            };
+        }
+        
+        // Additional validation could be added here:
+        // - Check if target is a valid type for the spell (creature, player, etc.)
+        // - Check if target has protection or shroud
+        // - Check if target is in the correct zone
+        
+        console.log(`ActionManager: Basic target validation passed for ${card.name} targeting ${targetId}.`);
+        return { valid: true };
     }
 
     /**

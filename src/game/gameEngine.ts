@@ -12,7 +12,7 @@ import { StateManager, StateManagerDependencies } from './stateManager.js';
 import { v4 as uuidv4 } from 'uuid'; 
 import DeckService, { DeckList } from '../services/deckService.js';
 import cardService from '../services/cardService.js'; // Import default instance of CardService
-import { DeckNotFoundError, DeckSelectionMissingError } from '../errors/customErrors.js';
+import { DeckNotFoundError, DeckSelectionMissingError, DeckValidationError } from '../errors/customErrors.js';
 
 // Utility function for shuffling an array (Fisher-Yates shuffle)
 function shuffleArray<T>(array: T[]): T[] {
@@ -108,6 +108,26 @@ export class GameEngine {
                     throw new DeckSelectionMissingError(`No deck selected for player ${playerId}.`, playerId);
                 }
                 console.log(`[DEBUG] GameEngine: Fetching deck ${deckId} for player ${playerId}.`);
+                
+                // First, validate the deck before processing
+                const deckList = await DeckService.fetchDeck(deckId);
+                const validationResult = DeckService.validateDeck(deckList, this.cardDatabase);
+                
+                if (!validationResult.valid) {
+                    console.error(`[GameEngine] Deck validation failed for player ${playerId}, deck ${deckId}:`);
+                    validationResult.errors.forEach((error, index) => {
+                        console.error(`  ${index + 1}. ${error}`);
+                    });
+                    throw new DeckValidationError(
+                        `Deck '${deckList.name}' failed validation: ${validationResult.errors.join('; ')}`,
+                        deckId,
+                        validationResult.errors,
+                        playerId
+                    );
+                }
+                
+                console.log(`[DEBUG] GameEngine: Deck validation passed for ${deckId}. Proceeding with card loading.`);
+                
                 // Use the getPlayerDeckCards method from the imported DeckService
                 // This method already handles creating card instances from the cardDatabase
                 let playerDeckCards;
@@ -155,6 +175,7 @@ export class GameEngine {
             gameObjects: {},
             attackers: {},
             blockers: {},
+            gameEnded: false,
         };
 
         // --- Instantiate Managers --- 
@@ -172,19 +193,56 @@ export class GameEngine {
         }
         this.gameState.players = initialPlayerStates as [PlayerState, PlayerState];
 
-        // Draw starting hands for each player
+        // Draw starting hands for each player using DeckService wrapper
         const STARTING_HAND_SIZE = 7; // Or get from game rules/config
         console.log(`[DEBUG] GameEngine: Drawing starting hands of size ${STARTING_HAND_SIZE} for each player.`);
+        
         for (const player of this.gameState.players) {
+          let handDrawn = 0;
+          
+          // Draw initial hand
           for (let i = 0; i < STARTING_HAND_SIZE; i++) {
-            if (player.library.length > 0) { // Check if library has cards to draw
-              this.playerDrawCard(player.playerId);
+            if (DeckService.drawCard(this.gameState, player.playerId)) {
+              handDrawn++;
             } else {
-              console.warn(`[GameEngine] Player ${player.playerId} has insufficient cards in library (${player.library.length}) to draw full starting hand of ${STARTING_HAND_SIZE}. Drawn ${i} cards.`);
+              console.warn(`[GameEngine] Player ${player.playerId} has insufficient cards in library to draw full starting hand of ${STARTING_HAND_SIZE}. Drawn ${handDrawn} cards.`);
               break; // Stop drawing for this player if library is empty
             }
           }
-          console.log(`[DEBUG] GameEngine: Player ${player.playerId} finished drawing starting hand. Hand size: ${player.hand.length}, Library size: ${player.library.length}`);
+          
+          // Basic mulligan support - if hand size is less than expected, redraw once
+          if (handDrawn < STARTING_HAND_SIZE && player.library.length >= STARTING_HAND_SIZE) {
+            console.log(`[DEBUG] GameEngine: Player ${player.playerId} eligible for mulligan (drew ${handDrawn}/${STARTING_HAND_SIZE}). Attempting redraw.`);
+            
+            // Return current hand to library
+            while (player.hand.length > 0) {
+              const cardInstanceId = player.hand.pop();
+              if (cardInstanceId) {
+                player.library.push(cardInstanceId);
+                // Update card zone
+                const cardObject = this.gameState.gameObjects[cardInstanceId];
+                if (cardObject) {
+                  cardObject.currentZone = 'library';
+                }
+              }
+            }
+            
+            // Reshuffle library
+            shuffleArray(player.library);
+            console.log(`[DEBUG] GameEngine: Reshuffled library for player ${player.playerId} mulligan. First 3 cards: [${player.library.slice(0, 3).join(', ')}]`);
+            
+            // Draw new hand
+            handDrawn = 0;
+            for (let i = 0; i < STARTING_HAND_SIZE; i++) {
+              if (DeckService.drawCard(this.gameState, player.playerId)) {
+                handDrawn++;
+              } else {
+                break;
+              }
+            }
+          }
+          
+          console.log(`[DEBUG] GameEngine: Player ${player.playerId} finished drawing starting hand. Hand size: ${player.hand.length}, Library size: ${player.library.length}, Deck count: ${player.deck_count}`);
         }
 
         console.log('[DEBUG] Instantiating CombatManager...');
@@ -475,14 +533,44 @@ export class GameEngine {
         console.warn('[GameEngine] passPriority called - Placeholder implementation');
     }
 
-    public playCard(playerId: PlayerId, cardId: string, targets?: string[]): void {
-        console.warn('[GameEngine] playCard called - Delegating to ActionManager');
-        // The ActionManager.playCard method will handle validation, cost payment, and putting the card on the stack.
-        // It also handles emitting events for invalid actions or throws errors for critical failures.
-        this.actionManager.playCard(playerId, cardId, targets);
-        // If playCard did not throw, it means the action was successfully initiated (card on stack or resource played).
-        // ActionManager.playCard should handle priority internally or via TurnManager after adding to stack.
-        console.log(`[GameEngine] playCard: ActionManager initiated play for card ${cardId} by player ${playerId}`);
+    public playCard(playerId: PlayerId, cardId: string, targets?: string[]): boolean {
+        console.log(`[GameEngine] playCard called for player ${playerId}, card ${cardId}`);
+        
+        // Check if game has ended
+        if (this.gameState.gameEnded) {
+            console.warn(`[GameEngine] playCard rejected: Game has already ended.`);
+            return false;
+        }
+        
+        try {
+            // The ActionManager.playCard method will handle validation, cost payment, and putting the card on the stack.
+            // It also handles emitting events for invalid actions or throws errors for critical failures.
+            this.actionManager.playCard(playerId, cardId, targets);
+            
+            // If playCard did not throw, it means the action was successfully initiated (card on stack or resource played).
+            // ActionManager.playCard should handle priority internally or via TurnManager after adding to stack.
+            console.log(`[GameEngine] playCard: ActionManager successfully initiated play for card ${cardId} by player ${playerId}`);
+            return true;
+            
+        } catch (error) {
+            // Log the error but don't crash the game
+            console.warn(`[GameEngine] playCard failed for player ${playerId}, card ${cardId}:`, error);
+            
+            // Check if it's a validation error (should return false) vs critical error (should propagate)
+            if (error instanceof Error && (
+                error.message.includes('validation') ||
+                error.message.includes('insufficient') ||
+                error.message.includes('priority') ||
+                error.message.includes('phase') ||
+                error.message.includes('not found')
+            )) {
+                // These are expected validation failures, return false
+                return false;
+            } else {
+                // Unexpected critical error, propagate it
+                throw error;
+            }
+        }
     }
 
     /**
@@ -500,9 +588,14 @@ export class GameEngine {
 
         if (playerState.library.length === 0) {
             console.warn(`GameEngine: Player ${playerId} attempts to draw from an empty library.`);
-            // Game loss due to drawing from empty library is typically a State-Based Action.
-            // This method just notes the attempt. SBAs should handle the game state consequence.
+            // Set loss condition immediately - this is a game loss
+            playerState.hasLost = true;
+            console.log(`GameEngine: Player ${playerId} loses due to deck depletion (attempted draw from empty library).`);
+            
             this.emitGameEvent(EventType.PLAYER_ATTEMPTED_DRAW_FROM_EMPTY_LIBRARY, { playerId });
+            
+            // Check if this ends the game
+            this.checkGameEnd('deck_depletion', playerId);
             return;
         }
 
@@ -542,5 +635,68 @@ export class GameEngine {
             throw new Error(`Could not find opponent for player ${playerId}.`);
         }
         return opponent.playerId;
+    }
+
+    /**
+     * Checks if the game should end and handles game end logic.
+     * This can be called from various places like deck depletion, SBAs, etc.
+     * @param reason The reason for the potential game end
+     * @param triggeringPlayerId Optional player who triggered the check
+     */
+    public checkGameEnd(reason: string, triggeringPlayerId?: PlayerId): void {
+        if (this.gameState.gameEnded) {
+            return; // Game already ended
+        }
+
+        const activePlayers = this.gameState.players.filter(p => !p.hasLost);
+        
+        if (activePlayers.length === 1) {
+            // Single winner
+            this.endGame(reason, activePlayers[0].playerId, triggeringPlayerId);
+        } else if (activePlayers.length === 0) {
+            // Draw - both players lost simultaneously
+            this.endGame('simultaneous_loss', null, triggeringPlayerId);
+        }
+        // If activePlayers.length > 1, game continues
+    }
+
+    /**
+     * Ends the game with proper state management and event emission.
+     * @param reason The reason for game end (e.g., 'life_depletion', 'deck_depletion')
+     * @param winnerId The winning player ID, or null for a draw
+     * @param loserId The losing player ID, or null if not applicable
+     */
+    public endGame(reason: string, winnerId: PlayerId | null, loserId?: PlayerId): void {
+        console.log(`[GameEngine] Game ending - Reason: ${reason}, Winner: ${winnerId || 'DRAW'}, Loser: ${loserId || 'N/A'}`);
+        
+        // Set game end state
+        this.gameState.gameEnded = true;
+        this.gameState.endReason = reason;
+        this.gameState.endTime = new Date();
+        
+        if (winnerId) {
+            this.gameState.winner = winnerId;
+        }
+        
+        if (loserId) {
+            this.gameState.loser = loserId;
+        }
+        
+        // Log game statistics
+        const gameDuration = this.gameState.endTime.getTime() - (this.gameState.endTime.getTime() - (this.gameState.turnNumber * 30000)); // Rough estimate
+        console.log(`[GameEngine] Game ended after ${this.gameState.turnNumber} turns. Duration: ~${Math.round(gameDuration / 1000 / 60)} minutes.`);
+        
+        // Emit game over event
+        this.emitGameEvent(EventType.GAME_OVER, {
+            gameId: this.gameState.gameId,
+            winner: winnerId,
+            loser: loserId,
+            reason: reason,
+            turnNumber: this.gameState.turnNumber,
+            endTime: this.gameState.endTime,
+            gameState: this.gameState // Include full final state
+        });
+        
+        console.log(`[GameEngine] GAME_OVER event emitted. Game ${this.gameState.gameId} has ended.`);
     }
 }

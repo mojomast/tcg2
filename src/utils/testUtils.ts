@@ -78,6 +78,7 @@ export function createMockGameState(players: [PlayerState, PlayerState], initial
         blockers: {}, // Initialize blockers
         startingPlayerId: players[0]?.playerId ?? 'player1', // Added missing property
         gameLog: [],
+        gameEnded: false, // Added missing property
         ...initialGameState // Apply any overrides
     };
     return defaultState;

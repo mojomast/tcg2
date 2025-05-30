@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rootDir": "src",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/server.ts",
+    "src/game/**/*",
+    "src/services/deckService.ts",
+    "src/services/cardService.ts", 
+    "src/interfaces/**/*",
+    "src/config/**/*",
+    "src/db/**/*",
+    "src/errors/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/components/**/*",
+    "src/App.tsx",
+    "src/store/**/*",
+    "src/services/apiService.ts",
+    "src/services/socketService.ts"
+  ]
+}
+
