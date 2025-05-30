@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../store/store';
-import { playCardViaSocket, playResourceViaSocket } from '../store/slices/gameSlice'; // Assuming actions for tap/untap will be here or similar
+import { playCardViaSocket, playResourceViaSocket, tapCardViaSocket } from '../store/slices/gameSlice';
 import ContextMenu from './ContextMenu'; // Import the new component
 
 interface ContextMenuItem {
@@ -125,9 +125,11 @@ const CardComponent: React.FC<CardProps> = ({ card, isAnimatingOut, cardLocation
       });
     } else if (cardLocation === 'battlefield' && isOwner) {
       items.push({
-        label: card.tapped ? 'Untap Card (Debug)' : 'Tap Card (Debug)',
-        onClick: () => console.log('Toggle Tap (Debug):', card.name), // Placeholder for actual tap/untap logic
-        disabled: false, // More complex logic needed here based on game phase/abilities
+        label: card.tapped ? 'Untap Card' : 'Tap Card',
+        onClick: () => {
+          dispatch(tapCardViaSocket({ cardId: card.instanceId }));
+        },
+        disabled: false, // Players can tap/untap their own permanents at any time
       });
       if (card.abilities && card.abilities.some(ab => ab.type === 'Activated')) { // Assuming abilities structure
         items.push({ label: 'Activate Ability (Debug)', onClick: () => console.log('Activate (Debug)'), disabled: true });

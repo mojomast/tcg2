@@ -260,3 +260,13 @@ export const playCardViaSocket = (payload: { cardId: string }): AppThunk => asyn
 export const playResourceViaSocket = (payload: { cardId: string }): AppThunk => async dispatch => {
   socketService.emit('play_resource', payload);
 };
+
+export const tapCardViaSocket = (payload: { cardId: string }): AppThunk => async (dispatch, getState) => {
+  const state = getState();
+  const playerId = state.game.localPlayerId;
+  if (!playerId) {
+    console.error('tapCardViaSocket: No local player ID available');
+    return;
+  }
+  socketService.emit('tap_card', { playerId, cardInstanceId: payload.cardId });
+};

@@ -733,20 +733,43 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         }
         
         const gameEngine = getGameEngineForSocket(socket);
-        if (gameEngine) {
+        if (gameEngine && gameEngine.resourceManager) {
           try {
-            // Resource cards are handled by the same playCard method in ActionManager
-            // The ActionManager will detect if it's a resource and handle it accordingly
-            gameEngine.playCard(data.playerId, data.cardInstanceId);
-            // If no exception was thrown, the action was successful
+            gameEngine.resourceManager.playResource(data.playerId, data.cardInstanceId);
             broadcastGameStateUpdate(gameEngine);
-            console.log(`[server.ts]: Play resource successful for ${data.cardInstanceId}, game state broadcasted.`);
+            console.log(`[server.ts]: Resource play successful for ${data.cardInstanceId}, game state broadcasted.`);
           } catch (error) {
             console.error(`[server.ts]: Error during play_resource for player ${data.playerId}:`, error);
-            socket.emit('action_error', { message: 'Play resource action failed due to internal error.' });
+            socket.emit('action_error', { message: 'Resource play action failed due to internal error.' });
           }
         } else {
-          console.error(`[server.ts]: Game engine not found for socket ${socket.id} during play_resource.`);
+          console.error(`[server.ts]: Game engine or resource manager not found for socket ${socket.id} during play_resource.`);
+          socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
+      socket.on('tap_card', (data: { playerId: string, cardInstanceId: string }) => {
+        console.log(`[server.ts]: Received tap_card from ${data.playerId} for card ${data.cardInstanceId}`);
+        
+        // Validate player ID matches socket
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for tap_card. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+        
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine && gameEngine.resourceManager) {
+          try {
+            gameEngine.resourceManager.toggleTapCard(data.playerId, data.cardInstanceId);
+            broadcastGameStateUpdate(gameEngine);
+            console.log(`[server.ts]: Card tap toggle successful for ${data.cardInstanceId}, game state broadcasted.`);
+          } catch (error) {
+            console.error(`[server.ts]: Error during tap_card for player ${data.playerId}:`, error);
+            socket.emit('action_error', { message: 'Card tap action failed due to internal error.' });
+          }
+        } else {
+          console.error(`[server.ts]: Game engine or resource manager not found for socket ${socket.id} during tap_card.`);
           socket.emit('action_error', { message: 'Game not found or not initialized.' });
         }
       });

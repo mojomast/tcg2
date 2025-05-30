@@ -294,6 +294,46 @@ export class ResourceManager {
         }
     }
 
+    /**
+     * Toggles the tapped state of a card on the battlefield.
+     * @param playerId The ID of the player attempting to tap/untap the card.
+     * @param cardInstanceId The instance ID of the card to toggle tap state.
+     */
+    toggleTapCard(playerId: PlayerId, cardInstanceId: GameObjectId): void {
+        console.log(`ResourceManager: Player ${playerId} attempting to toggle tap state of ${cardInstanceId}`);
+        
+        // Find the card in the game state
+        const card = this.gameState.gameObjects[cardInstanceId];
+        if (!card) {
+            throw new Error(`ResourceManager: Card instance ${cardInstanceId} not found in game objects.`);
+        }
+        
+        // Verify the player owns this card
+        if (card.controllerId !== playerId) {
+            throw new Error(`ResourceManager: Player ${playerId} does not control card ${cardInstanceId} (controlled by ${card.controllerId}).`);
+        }
+        
+        // Verify the card is on the battlefield
+        if (card.currentZone !== 'battlefield') {
+            throw new Error(`ResourceManager: Card ${cardInstanceId} is not on the battlefield (currently in ${card.currentZone}).`);
+        }
+        
+        // Toggle the tapped state
+        const wasTapped = card.tapped;
+        card.tapped = !card.tapped;
+        
+        console.log(`ResourceManager: Toggled ${card.name} (${cardInstanceId}) from ${wasTapped ? 'tapped' : 'untapped'} to ${card.tapped ? 'tapped' : 'untapped'}`);
+        
+        // Emit tap event
+        this.dependencies.emitGameEventFn(EventType.ZONE_CHANGE, {
+            playerId: playerId,
+            cardId: card.cardId,
+            instanceId: cardInstanceId,
+            action: card.tapped ? 'tapped' : 'untapped',
+            message: `Player ${playerId} ${card.tapped ? 'tapped' : 'untapped'} ${card.name}.`
+        });
+    }
+
     // --- Playing Resources ---
     /**
      * Attempts to play a resource card from a player's hand.
