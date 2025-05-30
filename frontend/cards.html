@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        .card-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+        .card {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 15px;
+            width: 250px;
+            background-color: #fff;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
+        }
+        .card img {
+            max-width: 100%;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .card h3 {
+            margin-top: 0;
+            font-size: 1.2em;
+            color: #333;
+        }
+        .card p {
+            font-size: 0.9em;
+            line-height: 1.4;
+            margin-bottom: 5px;
+        }
+        .pagination {
+            text-align: center;
+            margin-top: 30px;
+            margin-bottom: 30px;
+        }
+        .pagination button {
+            padding: 10px 15px;
+            margin: 0 5px;
+            border: 1px solid #ddd;
+            background-color: #eee;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .pagination button:disabled {
+            background-color: #f9f9f9;
+            color: #ccc;
+            cursor: not-allowed;
+        }
+        .loading, .error {
+            text-align: center;
+            font-size: 1.2em;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Magic: The Gathering Cards</h1>
+
+    <div class="pagination">
+        <button id="prevPage">Previous</button>
+        <span id="pageInfo">Page 1 of ?</span>
+        <button id="nextPage">Next</button>
+    </div>
+
+    <div id="cardsDisplay" class="card-container">
+        <p class="loading">Loading cards...</p>
+    </div>
+
+    <div class="pagination">
+        <button id="prevPageBottom">Previous</button>
+        <span id="pageInfoBottom">Page 1 of ?</span>
+        <button id="nextPageBottom">Next</button>
+    </div>
+
+    <script>
+        const cardsDisplay = document.getElementById('cardsDisplay');
+        const prevPageButton = document.getElementById('prevPage');
+        const nextPageButton = document.getElementById('nextPage');
+        const pageInfoSpan = document.getElementById('pageInfo');
+        const prevPageButtonBottom = document.getElementById('prevPageBottom');
+        const nextPageButtonBottom = document.getElementById('nextPageBottom');
+        const pageInfoSpanBottom = document.getElementById('pageInfoBottom');
+
+        let currentPage = 1;
+        const pageSize = 20;
+        let totalPages = 1;
+
+        async function fetchAndDisplayCards(page = 1) {
+            cardsDisplay.innerHTML = '<p class="loading">Loading cards...</p>'; // Show loading message
+            updatePaginationControls(true); // Disable buttons during fetch
+
+            try {
+                const response = await fetch(`/api/cards?page=${page}&pageSize=${pageSize}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                cardsDisplay.innerHTML = ''; // Clear previous cards or loading message
+
+                if (data.cards && data.cards.length > 0) {
+                    data.cards.forEach(card => {
+                        const cardElement = document.createElement('div');
+                        cardElement.classList.add('card');
+
+                        let imageHtml = '';
+                        if (card.imageUrl) { 
+                            imageHtml = `<img src="${card.imageUrl}" alt="${card.name}">`;
+                        } else {
+                            imageHtml = '<p><em>No image available</em></p>';
+                        }
+
+                        // Helper function to format mana cost
+                        function formatManaCost(cost) {
+                            if (!cost || Object.keys(cost).length === 0) return 'N/A';
+                            let displayCost = '';
+                            if (cost.W) displayCost += `${cost.W}W `;
+                            if (cost.U) displayCost += `${cost.U}U `;
+                            if (cost.B) displayCost += `${cost.B}B `;
+                            if (cost.R) displayCost += `${cost.R}R `;
+                            if (cost.G) displayCost += `${cost.G}G `;
+                            if (cost.C) displayCost += `${cost.C}C `;
+                            return displayCost.trim() || 'Free';
+                        }
+
+                        const typeLine = card.type + (card.subtype ? ` - ${card.subtype}` : '');
+
+                        cardElement.innerHTML = `
+                            ${imageHtml}
+                            <h3>${card.name}</h3>
+                            <p><strong>Mana Cost:</strong> ${formatManaCost(card.cost)}</p>
+                            <p><strong>Type:</strong> ${typeLine || 'N/A'}</p>
+                            <p><strong>Rarity:</strong> ${card.rarity || 'N/A'}</p>
+                            <p><strong>Set ID:</strong> ${card.setId || 'N/A'}</p>
+                            <p><strong>Text:</strong></p>
+                            <div>${card.rulesText ? card.rulesText.replace(/\n/g, '<br>') : 'N/A'}</div>
+                        `;
+                        cardsDisplay.appendChild(cardElement);
+                    });
+                } else {
+                    cardsDisplay.innerHTML = '<p>No cards found for this page.</p>';
+                }
+
+                currentPage = data.pagination.page;
+                totalPages = data.pagination.totalPages;
+                updatePageInfo();
+                updatePaginationControls();
+
+            } catch (error) {
+                console.error('Failed to fetch cards:', error);
+                cardsDisplay.innerHTML = '<p class="error">Failed to load cards. Please try again later.</p>';
+                updatePaginationControls(false); // Re-enable if error, though might want to keep disabled
+            }
+        }
+
+        function updatePageInfo() {
+            const infoText = `Page ${currentPage} of ${totalPages}`;
+            pageInfoSpan.textContent = infoText;
+            pageInfoSpanBottom.textContent = infoText;
+        }
+
+        function updatePaginationControls(isLoading = false) {
+            if (isLoading) {
+                prevPageButton.disabled = true;
+                nextPageButton.disabled = true;
+                prevPageButtonBottom.disabled = true;
+                nextPageButtonBottom.disabled = true;
+            } else {
+                prevPageButton.disabled = currentPage <= 1;
+                nextPageButton.disabled = currentPage >= totalPages;
+                prevPageButtonBottom.disabled = currentPage <= 1;
+                nextPageButtonBottom.disabled = currentPage >= totalPages;
+            }
+        }
+
+        prevPageButton.addEventListener('click', () => {
+            if (currentPage > 1) {
+                fetchAndDisplayCards(currentPage - 1);
+            }
+        });
+
+        nextPageButton.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                fetchAndDisplayCards(currentPage + 1);
+            }
+        });
+
+        prevPageButtonBottom.addEventListener('click', () => {
+            if (currentPage > 1) {
+                fetchAndDisplayCards(currentPage - 1);
+            }
+        });
+
+        nextPageButtonBottom.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                fetchAndDisplayCards(currentPage + 1);
+            }
+        });
+
+        // Initial fetch
+        fetchAndDisplayCards(currentPage);
+    </script>
+</body>
+</html>

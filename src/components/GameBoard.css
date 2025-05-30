@@ -1,0 +1,96 @@
+.game-board {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 3fr 1fr; /* Battlefield narrower, hand zone wider */
+  grid-template-rows: auto auto auto auto auto auto auto; /* Added row for full-width player hand */
+  grid-template-areas:
+    "opp-info-area opp-info-area opp-info-area opp-info-area"
+    "opp-deck-area opp-hand-area opp-bf-area opp-discard-area"
+    "stack-area stack-area stack-area stack-area"
+    "player-deck-area player-bf-area player-bf-area player-discard-area" /* Player battlefield spans, hand removed from this row */
+    "player-hand-area player-hand-area player-hand-area player-hand-area" /* New full-width player hand row */
+    "player-info-area player-info-area player-info-area player-info-area"
+    "action-controls-area action-controls-area action-controls-area action-controls-area";
+  min-height: 100vh;
+  padding: 10px;
+  gap: 10px; /* Adds space between grid cells */
+  background-color: #f0f0f0; /* Light grey background for the whole board */
+}
+
+/* Styles for the grid area wrappers */
+.game-board > div[class*="-area"] {
+  padding: 10px; /* Padding inside each grid cell */
+  border: 1px dashed #999; /* Dashed border for areas to see them */
+  border-radius: 5px;
+  display: flex; /* Use flex to manage content within each area if needed */
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Assign grid areas */
+.opponent-info-bar-area { grid-area: opp-info-area; }
+.opponent-deck-zone-area { grid-area: opp-deck-area; }
+.opponent-hand-zone-area { grid-area: opp-hand-area; }
+.opponent-battlefield-area { grid-area: opp-bf-area; }
+.opponent-discard-zone-area { grid-area: opp-discard-area; }
+.stack-zone-area { grid-area: stack-area; }
+.player-deck-zone-area { grid-area: player-deck-area; }
+.player-hand-zone-area { grid-area: player-hand-area; }
+.player-battlefield-area { grid-area: player-bf-area; }
+.player-discard-zone-area { grid-area: player-discard-area; }
+.player-info-bar-area { 
+  grid-area: player-info-area; 
+  flex-direction: row; /* Player info and phase side-by-side */
+  justify-content: space-around;
+}
+.action-controls-area { grid-area: action-controls-area; }
+
+/* Styles for the actual components (placeholders) */
+.game-board > div[class*="-area"] > div {
+  padding: 15px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  text-align: center;
+  font-family: sans-serif;
+  color: #333; /* Added for better text contrast */
+  width: 100%; /* Make components fill their area cell */
+  box-sizing: border-box;
+}
+
+.opponent-info-bar { background-color: #ffebee; } /* Light Red */
+.player-info-bar { background-color: #e3f2fd; }   /* Light Blue */
+.opponent-battlefield { 
+  background-color: #fff9c4; 
+  min-height: 150px; 
+  display: flex; 
+  flex-wrap: wrap; 
+  align-items: flex-start; 
+  padding: 5px; 
+}
+.player-battlefield { 
+  background-color: #c8e6c9; 
+  min-height: 150px; 
+  display: flex; 
+  flex-wrap: wrap; 
+  align-items: flex-start; 
+  padding: 5px; 
+}
+.opponent-hand-zone { background-color: #f3e5f5; min-height: 80px; width: 100%; height: 100%; box-sizing: border-box; }
+.player-hand-zone {
+  width: 100%; /* Ensure it fills the grid area */
+  height: 100%; /* Ensure it fills the grid area */
+  box-sizing: border-box; /* Include padding and border in the element's total width and height */
+  background-color: #7f8c8d; /* Darker Slate for Player Hand */
+  border: 1px solid #2c3e50; /* Dark Blue-Gray Border */
+  display: flex; /* Added to arrange cards in a row */
+  flex-wrap: wrap; /* Allow cards to wrap if the hand is large */
+  align-items: flex-start; /* Align cards to the top */
+  padding: 5px; /* Add some padding inside the zone */
+  overflow-y: auto; /* Allow scrolling if many cards */
+}
+.player-deck-zone { background-color: #d1c4e9; }
+.opponent-discard-zone { background-color: #fce4ec; }
+.player-discard-zone { background-color: #f0f4c3; }
+.stack-zone { background-color: #e1f5fe; min-height: 100px; }
+.phase-display { background-color: #f1f8e9; }
+.action-controls { background-color: #fff3e0; }

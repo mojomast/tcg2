@@ -1,5 +1,15 @@
-export type ManaColor = 'R' | 'U' | 'G' | 'B' | 'W';
-export type CardType = 'Creature' | 'Spell' | 'Enchantment' | 'Resource';
+import { ManaColor as GameStateManaColor } from './gameState';
+
+export type CardType =
+    | 'Creature'
+    | 'Artifact'
+    | 'Enchantment'
+    | 'Planeswalker'
+    | 'Land'
+    | 'Instant'
+    | 'Sorcery'
+    | 'Resource'; // Keep Resource for now, maybe review later
+
 export type Rarity = 'Common' | 'Uncommon' | 'Rare' | 'Mythic' | 'Legendary';
 export type SpellSpeed = 'Instant' | 'Sorcery';
 export type Keyword =
@@ -14,9 +24,10 @@ export type Keyword =
     | 'First Strike'
     | 'Double Strike'
     | 'Flash'
-    | 'Reach'
+    | 'Reach' // Added Reach
     | 'Cannot Block'
-    | 'Vigilance';
+    | 'Vigilance'
+    | 'Stealth'; // Added Stealth keyword
 
 // Represents the cost of a card (e.g., { R: 1, colorless: 2 } for 1RR)
 export interface ManaCost {
@@ -25,7 +36,7 @@ export interface ManaCost {
   G?: number;
   B?: number;
   W?: number;
-  colorless?: number;
+  C?: number; // Use 'C' for consistency with GameStateManaColor type from gameState
 }
 
 // Base Card Interface
@@ -41,12 +52,22 @@ export interface Card {
   setId: string; // FK to the Set table
   collectorNumber: string;
   imageUrl?: string;
+  isTapped?: boolean; // Added for cards in play
 
   // Type-specific properties (optional)
-  power?: number; // For Creatures
-  toughness?: number; // For Creatures
+  attack?: number; // For Creatures (renamed from power)
+  health?: number; // For Creatures (renamed from toughness)
   keywords?: Keyword[]; // For Creatures primarily, but could apply elsewhere (Flash)
   spellSpeed?: SpellSpeed; // For Spells
+  producesMana?: ManaCost; // Optional: Mana produced by the card (e.g., when tapped)
+  abilities?: Ability[]; // Optional: Card abilities
   // Add more specific fields for Enchantments, Resources as needed
   text?: string; // Rules text
+  colorIdentity?: string[]; // Represents the card's color identity, e.g., ['W', 'U']
+}
+
+export interface Ability {
+  type: 'Activated' | 'Triggered' | 'Static';
+  cost?: ManaCost;
+  effectDescription: string;
 }

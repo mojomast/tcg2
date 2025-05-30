@@ -1,0 +1,40 @@
+/* src/components/MainMenu.css */
+.main-menu-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-family: Arial, sans-serif;
+  background-color: #f0f0f0; /* Light grey background */
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.main-menu-container h1 {
+  color: #333; /* Dark grey text */
+  margin-bottom: 40px;
+}
+
+.menu-options button {
+  display: block;
+  width: 200px;
+  padding: 15px;
+  margin: 10px auto;
+  font-size: 18px;
+  color: white;
+  background-color: #007bff; /* Blue */
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.menu-options button:hover {
+  background-color: #0056b3; /* Darker blue */
+}
+
+.menu-options button:disabled {
+  background-color: #cccccc; /* Grey for disabled */
+  cursor: not-allowed;
+}

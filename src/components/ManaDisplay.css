@@ -1,0 +1,56 @@
+.mana-display-container {
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin-top: 10px;
+  background-color: #f9f9f9;
+  border-radius: 5px;
+}
+
+.mana-display-container h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1.2em;
+  color: #333;
+}
+
+.mana-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px; /* Gap between mana symbols or groups */
+}
+
+.mana-color-group {
+    display: flex;
+    gap: 2px; /* Gap between individual symbols of the same color */
+}
+
+.mana-symbol {
+  display: inline-flex; /* Changed to inline-flex for better alignment */
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-weight: bold;
+  color: white;
+  font-size: 0.9em;
+  text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+  box-shadow: 0 0 3px rgba(0,0,0,0.3);
+}
+
+.mana-w { background-color: #f8f6d8; color: #4e4545; text-shadow: none; }
+.mana-u { background-color: #c1d7e9; color: #0e3a5d; text-shadow: none; }
+.mana-b { background-color: #bab1ab; color: #1c1c1c; text-shadow: none; }
+.mana-r { background-color: #e9c0c0; color: #641e1e; text-shadow: none; }
+.mana-g { background-color: #c4d3c4; color: #1e471e; text-shadow: none; }
+.mana-c { background-color: #d3d3d3; color: #2f2f2f; text-shadow: none; }
+
+/* Placeholder for actual mana symbols if using images/icons later */
+/* Example for an image-based symbol */
+/*
+.mana-symbol.mana-w {
+  background-image: url('/path/to/white-mana.svg');
+  background-size: cover;
+  color: transparent; 
+}
+*/

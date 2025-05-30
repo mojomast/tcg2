@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO Connection Test</title>
+</head>
+<body>
+    <h1>Socket.IO Connection Test</h1>
+    <div id="status">Initializing...</div>
+    <div id="log"></div>
+    
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        
+        function log(message) {
+            console.log(message);
+            logDiv.innerHTML += '<div>' + new Date().toLocaleTimeString() + ': ' + message + '</div>';
+        }
+        
+        log('Starting Socket.IO connection test...');
+        statusDiv.textContent = 'Connecting...';
+        
+        // Test 1: Basic connection
+        const socket = io('http://localhost:3000', {
+            transports: ['polling'],
+            autoConnect: true
+        });
+        
+        socket.on('connect', () => {
+            log('✅ SUCCESS: Connected to server! Socket ID: ' + socket.id);
+            statusDiv.textContent = 'Connected! ID: ' + socket.id;
+            statusDiv.style.color = 'green';
+        });
+        
+        socket.on('connect_error', (error) => {
+            log('❌ Connection Error: ' + error.message);
+            statusDiv.textContent = 'Connection Failed: ' + error.message;
+            statusDiv.style.color = 'red';
+        });
+        
+        socket.on('test_event', (data) => {
+            log('📨 Received test_event: ' + JSON.stringify(data));
+        });
+        
+        socket.on('disconnect', (reason) => {
+            log('🔌 Disconnected: ' + reason);
+            statusDiv.textContent = 'Disconnected: ' + reason;
+            statusDiv.style.color = 'orange';
+        });
+        
+        // Test join_game after 2 seconds if connected
+        setTimeout(() => {
+            if (socket.connected) {
+                log('🎮 Testing join_game event...');
+                socket.emit('join_game', { gameId: 'test-game-001', playerId: 'player1' });
+            } else {
+                log('⚠️ Cannot test join_game - not connected');
+            }
+        }, 2000);
+        
+        socket.on('game_event', (data) => {
+            log('🎯 Received game_event: ' + JSON.stringify(data, null, 2));
+        });
+        
+        // Timeout test
+        setTimeout(() => {
+            if (!socket.connected) {
+                log('⏰ TIMEOUT: No connection after 10 seconds');
+                statusDiv.textContent = 'Timeout - No connection';
+                statusDiv.style.color = 'red';
+            }
+        }, 10000);
+    </script>
+</body>
+</html>
+
