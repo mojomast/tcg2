@@ -22,6 +22,16 @@ import { EventType, GameEvent, GameState as ServerGameState } from '../interface
 import socketService from '../services/socketService.js';
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from '../config/constants.js';
 import DeckSelectionModal from './DeckSelectionModal.js';
+import apiService from '../services/apiService.js';
+
+// Define DeckInfo interface for the component
+interface DeckInfo {
+  id: string;
+  name: string;
+  cardCount?: number;
+  isValid?: boolean;
+  validationErrors?: string[];
+}
 
 const GameBoard: React.FC = () => {
   const dispatch = useDispatch();
@@ -30,15 +40,45 @@ const GameBoard: React.FC = () => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(TEST_PLAYER_1_ID);
   const [showDeckSelection, setShowDeckSelection] = useState(false);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [availableDecks, setAvailableDecks] = useState<DeckInfo[]>([]);
+  const [loadingDecks, setLoadingDecks] = useState(false);
+  const [deckError, setDeckError] = useState<string | null>(null);
 
   // useEffect to log when localPlayerId changes, useful for debugging UI state
   useEffect(() => {
     console.log('[GameBoard] localPlayerId is now:', localPlayerId);
   }, [localPlayerId]);
 
+  // Function to fetch decks from API
+  const fetchDecks = async () => {
+    setLoadingDecks(true);
+    setDeckError(null);
+    try {
+      const decks = await apiService.getAllDecks();
+      // Convert DeckBasicInfo to DeckInfo format
+      const deckInfos: DeckInfo[] = decks.map(deck => ({
+        id: deck.id,
+        name: deck.name,
+        // Will be populated later with proper validation
+        isValid: true, // Assume valid for now
+        cardCount: undefined, // Will be fetched later if needed
+        validationErrors: []
+      }));
+      setAvailableDecks(deckInfos);
+      console.log('[GameBoard] Fetched', deckInfos.length, 'decks from API');
+    } catch (error) {
+      console.error('[GameBoard] Error fetching decks:', error);
+      setDeckError(error instanceof Error ? error.message : 'Failed to fetch decks');
+      setAvailableDecks([]);
+    } finally {
+      setLoadingDecks(false);
+    }
+  };
+
   const handleJoinGame = () => {
     if (selectedPlayerId) {
-      // Show deck selection modal before joining game
+      // Fetch decks before showing the modal
+      fetchDecks();
       setShowDeckSelection(true);
     }
   };
@@ -83,8 +123,45 @@ const GameBoard: React.FC = () => {
           onSelectDeck={handleDeckSelected}
           onCancel={handleDeckSelectionCancel}
           playerId={selectedPlayerId}
-          availableDecks={[]}
+          availableDecks={loadingDecks ? [] : availableDecks}
         />
+        
+        {/* Show loading state */}
+        {showDeckSelection && loadingDecks && (
+          <div style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            zIndex: 1001
+          }}>
+            Loading decks...
+          </div>
+        )}
+        
+        {/* Show error state */}
+        {showDeckSelection && deckError && (
+          <div style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: '#fee',
+            border: '1px solid #fcc',
+            padding: '20px',
+            borderRadius: '8px',
+            color: '#c33',
+            zIndex: 1001
+          }}>
+            Error loading decks: {deckError}
+            <br />
+            <button onClick={fetchDecks} style={{ marginTop: '10px' }}>Retry</button>
+          </div>
+        )}
       </div>
     );
   }

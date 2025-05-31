@@ -82,6 +82,16 @@ export interface CardQueryCriteria {
   // Add other potential criteria: keywords, set, rarity, etc.
 }
 
+export interface CardSearchParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;          // Name/text search
+  manaType?: string[];      // Color filter: ["R", "G"]
+  cardType?: string;        // "Creature", "Instant", etc.
+  cmc?: number;            // Converted mana cost
+  rarity?: string;         // "Common", "Rare", etc.
+}
+
 const calculateCMC = (cost: ManaCost | undefined): number => {
     if (!cost) return 0;
     return Object.values(cost).reduce((sum, val) => sum + (val || 0), 0);
@@ -149,6 +159,87 @@ class CardService {
         totalCards: 0,
         page,
         pageSize,
+        totalPages: 0,
+      };
+    }
+  }
+
+  public getCardsWithSearch(searchParams: CardSearchParams): PaginatedCardsResponse {
+    try {
+      const { page = 1, pageSize = 20, search, manaType, cardType, cmc, rarity } = searchParams;
+      const offset = (page - 1) * pageSize;
+      
+      let query = 'SELECT * FROM cards WHERE 1=1';
+      let countQuery = 'SELECT COUNT(*) as total FROM cards WHERE 1=1';
+      const params: (string | number)[] = [];
+      
+      // Text search in name and rules_text
+      if (search && search.trim() !== '') {
+        query += ' AND (name LIKE ? OR rules_text LIKE ?)';
+        countQuery += ' AND (name LIKE ? OR rules_text LIKE ?)';
+        const searchPattern = `%${search.trim()}%`;
+        params.push(searchPattern, searchPattern);
+      }
+      
+      // Mana type/color filter
+      if (manaType && manaType.length > 0) {
+        // Filter cards that contain at least one of the specified colors
+        const colorConditions = manaType.map(() => 'INSTR(color_identity, ?) > 0').join(' OR ');
+        query += ` AND (${colorConditions})`;
+        countQuery += ` AND (${colorConditions})`;
+        manaType.forEach(color => {
+          params.push(`"${color}"`);
+        });
+      }
+      
+      // Card type filter
+      if (cardType && cardType.trim() !== '') {
+        query += ' AND card_type = ?';
+        countQuery += ' AND card_type = ?';
+        params.push(cardType.trim());
+      }
+      
+      // CMC filter (exact match)
+      if (cmc !== undefined && cmc >= 0) {
+        query += ' AND cmc = ?';
+        countQuery += ' AND cmc = ?';
+        params.push(cmc);
+      }
+      
+      // Rarity filter
+      if (rarity && rarity.trim() !== '') {
+        query += ' AND rarity = ?';
+        countQuery += ' AND rarity = ?';
+        params.push(rarity.trim());
+      }
+      
+      // Add ordering and pagination to main query
+      query += ' ORDER BY name ASC LIMIT ? OFFSET ?';
+      const finalParams = [...params, pageSize, offset];
+      
+      // Execute queries
+      const cardsStmt = db.prepare(query);
+      const cardRows = cardsStmt.all(...finalParams) as any[];
+      const cards = cardRows.map(mapRowToCard);
+
+      const countStmt = db.prepare(countQuery);
+      const { total } = countStmt.get(...params) as { total: number };
+
+      return {
+        cards,
+        totalCards: total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      };
+    } catch (error) {
+      console.error('Error in getCardsWithSearch:', error);
+      console.error('Search params:', searchParams);
+      return {
+        cards: [],
+        totalCards: 0,
+        page: searchParams.page || 1,
+        pageSize: searchParams.pageSize || 20,
         totalPages: 0,
       };
     }
@@ -269,3 +360,4 @@ class CardService {
 
 const cardService = new CardService();
 export default cardService;
+export { CardSearchParams };

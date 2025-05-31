@@ -12,7 +12,8 @@ import { PlayerId, EventType, GameEvent } from './interfaces/gameState.js'; // I
 import { Card, CardType } from './interfaces/card.js'; // Import Card for decklists
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from './config/constants.js'; // Import constants
 import deckService from './services/deckService.js'; // Assuming DeckService is default export
-import cardService from './services/cardService.js'; // Import CardService
+import cardService, { CardSearchParams } from './services/cardService.js'; // Import CardService and interface
+import { generateDeck, DeckConfig } from './services/deckGenerationService.js'; // Import deck generation
 import path from 'path'; // Import path module
 import { fileURLToPath } from 'url'; // Added for __dirname
 import { initializeDatabase, getAllDecks, DeckBasicInfo } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo
@@ -401,11 +402,25 @@ app.get('/', (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, '..', 'dist_frontend', 'index.html'));
 });
 
-// API endpoint to get cards from the database
+// API endpoint to get cards from the database with search support
 app.get('/api/cards', (req: Request, res: Response): void => { 
   try {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.pageSize as string) || 20;
+    const search = req.query.search as string;
+    const cardType = req.query.cardType as string;
+    const cmc = req.query.cmc ? parseInt(req.query.cmc as string) : undefined;
+    const rarity = req.query.rarity as string;
+    
+    // Handle manaType as array (can be passed as multiple query params or comma-separated)
+    let manaType: string[] | undefined;
+    if (req.query.manaType) {
+      if (Array.isArray(req.query.manaType)) {
+        manaType = req.query.manaType as string[];
+      } else {
+        manaType = (req.query.manaType as string).split(',').map(c => c.trim()).filter(c => c);
+      }
+    }
 
     if (page <= 0) {
       res.status(400).json({ message: 'Page number must be positive.' });
@@ -416,7 +431,24 @@ app.get('/api/cards', (req: Request, res: Response): void => {
       return;
     }
 
-    const paginatedResult = cardService.getCards(page, pageSize);
+    // Use search functionality if any search parameters are provided
+    const hasSearchParams = search || manaType || cardType || cmc !== undefined || rarity;
+    let paginatedResult;
+    
+    if (hasSearchParams) {
+      paginatedResult = cardService.getCardsWithSearch({
+        page,
+        pageSize,
+        search,
+        manaType,
+        cardType,
+        cmc,
+        rarity
+      });
+    } else {
+      paginatedResult = cardService.getCards(page, pageSize);
+    }
+
     res.json({
       cards: paginatedResult.cards,
       pagination: {
@@ -440,6 +472,63 @@ app.get('/api/cards', (req: Request, res: Response): void => {
       } catch (error) {
         console.error('Error fetching all decks:', error);
         res.status(500).json({ message: 'Failed to fetch decks from the database.' });
+      }
+    });
+
+    // API endpoint to generate a new deck
+    app.post('/api/generate-deck', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const {
+          colors,
+          totalCards = 60,
+          landRatio = 0.4,
+          creatureRatio = 0.35,
+          spellRatio = 0.25,
+          deckName,
+          playerId
+        } = req.body;
+        
+        // Validate required parameters
+        if (!colors || !Array.isArray(colors) || colors.length === 0) {
+          res.status(400).json({ message: 'Colors array is required and must not be empty.' });
+          return;
+        }
+        
+        if (!playerId || typeof playerId !== 'string') {
+          res.status(400).json({ message: 'Player ID is required and must be a string.' });
+          return;
+        }
+        
+        console.log(`[server]: Generating deck for player ${playerId} with colors ${colors.join(', ')}`);
+        
+        const config: DeckConfig = {
+          colors,
+          totalCards,
+          landRatio,
+          creatureRatio,
+          spellRatio,
+          playerId
+        };
+        
+        const generatedDeck = await generateDeck(config);
+        
+        res.json({
+          success: true,
+          deck: {
+            name: deckName || generatedDeck.deckName,
+            colors,
+            totalCards: generatedDeck.mainBoard.reduce((sum, entry) => sum + entry.quantity, 0),
+            mainBoard: generatedDeck.mainBoard,
+            sideBoard: generatedDeck.sideBoard || []
+          },
+          message: 'Deck generated successfully'
+        });
+      } catch (error) {
+        console.error('[server]: Error generating deck:', error);
+        res.status(500).json({ 
+          message: 'Failed to generate deck due to internal error.',
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     });
 
