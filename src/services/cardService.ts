@@ -360,4 +360,3 @@ class CardService {
 
 const cardService = new CardService();
 export default cardService;
-export { CardSearchParams };

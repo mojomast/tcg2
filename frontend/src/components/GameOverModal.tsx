@@ -26,7 +26,7 @@ const GameOverModal: React.FC<GameOverModalProps> = ({ onPlayAgain, onReturnToMe
   const getWinReason = () => {
     // This is a placeholder - in a real game, the server would send the win reason
     const players = gameState.players;
-    const losingPlayer = players.find(p => p.playerId !== winner);
+    const losingPlayer = players.find((p: any) => p.playerId !== winner);
     
     if (losingPlayer && losingPlayer.life <= 0) {
       return `${loserName} reached 0 life`;

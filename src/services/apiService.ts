@@ -55,6 +55,20 @@ interface DeckEntry {
   quantity: number;
 }
 
+// Interface for detailed deck response with card information
+interface DeckDetails extends DeckBasicInfo {
+  mainBoard: DeckCardEntry[];
+  sideBoard: DeckCardEntry[];
+  totalCards: number;
+}
+
+// Interface for deck card entries with full card details
+interface DeckCardEntry {
+  cardId: string;
+  quantity: number;
+  card: Card;
+}
+
 const API_BASE_URL = '/api'; // Assuming your API routes are prefixed with /api
 
 export const apiService = {
@@ -163,10 +177,30 @@ export const apiService = {
     }
   },
 
+  /**
+   * Fetches detailed deck information by ID
+   */
+  async getDeckById(deckId: string): Promise<DeckDetails> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/decks/${deckId}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to fetch deck details and parse error response' }));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      const deckDetails: DeckDetails = await response.json();
+      return deckDetails;
+    } catch (error) {
+      console.error('Error fetching deck details:', error);
+      throw error;
+    }
+  },
+
   // Future API functions can be added here, e.g.:
-  // async getDeckById(deckId: string): Promise<DeckDetails> { ... }
   // async saveDeck(deckData: DeckData): Promise<DeckBasicInfo> { ... }
   // async getCards(page: number, pageSize: number): Promise<PaginatedCardsResponse> { ... }
 };
+
+// Export interfaces for use in components
+export type { DeckBasicInfo, DeckDetails, DeckCardEntry, Card };
 
 export default apiService;

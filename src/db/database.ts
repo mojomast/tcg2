@@ -90,7 +90,7 @@ export async function initializeDatabase(): Promise<void> {
   // Enable foreign key support if not enabled by default (good practice for SQLite)
   db.pragma('foreign_keys = ON');
 
-  // await seedInitialData();
+  await seedInitialData();
 }
 
 async function seedInitialData(): Promise<void> {

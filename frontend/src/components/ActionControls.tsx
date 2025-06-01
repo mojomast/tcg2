@@ -12,7 +12,7 @@ interface ActionControlsProps {
   priorityHolderId?: string | null; // ID of the player who currently has priority
 }
 
-const ActionControls: React.FC<ActionControlsProps> = ({ onStartGame, isLoading, onPassPriority, gameActive, currentPlayerId, priorityHolderId }) => {
+const ActionControls: React.FC<ActionControlsProps> = ({ onStartGame, isLoading, onPassPriority, gameActive }) => {
   const [selectedAttackers, setSelectedAttackers] = useState<string[]>([]);
   const [selectedBlockers, setSelectedBlockers] = useState<{[blockerId: string]: string}>({});
   const [combatActionLoading, setCombatActionLoading] = useState(false);

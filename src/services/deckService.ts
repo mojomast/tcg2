@@ -1,5 +1,5 @@
-// Placeholder for DeckService
-// TODO: Implement actual deck loading and management logic
+// DeckService - Comprehensive deck management with database operations
+// Handles CRUD operations for decks and deck_cards tables with transaction support
 
 import { Card } from '../interfaces/card.js';
 import { GameState, PlayerId } from '../interfaces/gameState.js';
@@ -12,9 +12,251 @@ export interface DeckList {
   cards: { cardId: string; quantity: number }[];
 }
 
+export interface DeckInfo {
+  id: string;
+  player_id: string;
+  name: string;
+  format?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckCard {
+  deck_id: string;
+  card_id: string;
+  quantity: number;
+  is_sideboard: number; // 0 for mainboard, 1 for sideboard
+}
+
 const DeckService = {
-  async createDeck(deckId: string, playerId: string, name: string, cards: { cardId: string; quantity: number }[]): Promise<void> {
+  /**
+   * Gets a deck by its ID with full deck information
+   * @param deckId The deck ID to retrieve
+   * @returns Complete deck information including metadata
+   */
+  async getDeckById(deckId: string): Promise<DeckInfo> {
+    console.log(`[DeckService] Getting deck by ID: ${deckId}`);
+    try {
+      const deckQuery = db.prepare(`
+        SELECT id, player_id, name, format, description, created_at, updated_at 
+        FROM decks 
+        WHERE id = ?
+      `);
+      const deck = deckQuery.get(deckId) as DeckInfo | undefined;
+
+      if (!deck) {
+        throw new DeckNotFoundError(`Deck with ID ${deckId} not found.`, deckId);
+      }
+
+      console.log(`[DeckService] Found deck: ${deck.name} owned by ${deck.player_id}`);
+      return deck;
+    } catch (error) {
+      console.error(`[DeckService] Error getting deck ${deckId}:`, error);
+      if (error instanceof DeckNotFoundError) throw error;
+      throw new Error(`Failed to retrieve deck ${deckId}: ${(error as Error).message}`);
+    }
+  },
+
+  /**
+   * Creates a new deck with the provided information and cards
+   * @param deckId Unique identifier for the deck
+   * @param playerId The player who owns the deck
+   * @param name Name of the deck
+   * @param cards Array of cards with quantities to add to the deck
+   * @param format Optional format (defaults to 'standard')
+   * @param description Optional description
+   */
+  async createDeck(deckId: string, playerId: string, name: string, cards: { cardId: string; quantity: number }[], format?: string, description?: string): Promise<void> {
     console.log(`[DeckService] Creating deck: ${name} (ID: ${deckId}) for player ${playerId}`);
+    
+    const insertDeckStmt = db.prepare(`
+      INSERT INTO decks (id, player_id, name, format, description, created_at, updated_at)
+      VALUES (@id, @player_id, @name, @format, @description, datetime('now'), datetime('now'))
+    `);
+
+    const insertDeckCardStmt = db.prepare(`
+      INSERT INTO deck_cards (deck_id, card_id, quantity, is_sideboard)
+      VALUES (@deck_id, @card_id, @quantity, @is_sideboard)
+    `);
+
+    // Use a transaction to ensure atomicity
+    const transaction = db.transaction(() => {
+      // Insert the deck
+      const deckInfo = insertDeckStmt.run({
+        id: deckId,
+        player_id: playerId,
+        name: name,
+        format: format || 'standard',
+        description: description || `Deck for ${playerId}`
+      });
+
+      if (deckInfo.changes === 0) {
+        throw new Error(`Failed to create deck ${deckId}`);
+      }
+
+      // Insert deck cards
+      for (const card of cards) {
+        if (card.quantity <= 0) continue; // Skip if quantity is zero or less
+        insertDeckCardStmt.run({
+          deck_id: deckId,
+          card_id: card.cardId,
+          quantity: card.quantity,
+          is_sideboard: 0 // Default to mainboard
+        });
+      }
+      
+      console.log(`[DeckService] Deck ${name} (ID: ${deckId}) and its cards created successfully.`);
+    });
+
+    try {
+      transaction();
+    } catch (error) {
+      console.error(`[DeckService] Error creating deck ${deckId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Updates an existing deck's information and optionally its cards
+   * @param deckId The deck ID to update
+   * @param updates Object containing fields to update
+   * @param newCards Optional new card list to replace existing cards
+   */
+  async updateDeck(deckId: string, updates: Partial<Pick<DeckInfo, 'name' | 'format' | 'description'>>, newCards?: { cardId: string; quantity: number }[]): Promise<void> {
+    console.log(`[DeckService] Updating deck: ${deckId}`);
+    
+    // First verify the deck exists
+    await this.getDeckById(deckId);
+    
+    const updateDeckStmt = db.prepare(`
+      UPDATE decks 
+      SET name = COALESCE(@name, name),
+          format = COALESCE(@format, format),
+          description = COALESCE(@description, description),
+          updated_at = datetime('now')
+      WHERE id = @id
+    `);
+
+    const deleteDeckCardsStmt = db.prepare(`
+      DELETE FROM deck_cards WHERE deck_id = ?
+    `);
+
+    const insertDeckCardStmt = db.prepare(`
+      INSERT INTO deck_cards (deck_id, card_id, quantity, is_sideboard)
+      VALUES (@deck_id, @card_id, @quantity, @is_sideboard)
+    `);
+
+    // Use a transaction to maintain consistency
+    const transaction = db.transaction(() => {
+      // Update deck information
+      const result = updateDeckStmt.run({
+        id: deckId,
+        name: updates.name || null,
+        format: updates.format || null,
+        description: updates.description || null
+      });
+
+      if (result.changes === 0) {
+        throw new Error(`Failed to update deck ${deckId}`);
+      }
+
+      // If new cards are provided, replace all existing cards
+      if (newCards) {
+        // Delete existing cards
+        deleteDeckCardsStmt.run(deckId);
+        
+        // Insert new cards
+        for (const card of newCards) {
+          if (card.quantity <= 0) continue;
+          insertDeckCardStmt.run({
+            deck_id: deckId,
+            card_id: card.cardId,
+            quantity: card.quantity,
+            is_sideboard: 0
+          });
+        }
+        console.log(`[DeckService] Updated deck ${deckId} with ${newCards.length} card entries`);
+      } else {
+        console.log(`[DeckService] Updated deck ${deckId} metadata only`);
+      }
+    });
+
+    try {
+      transaction();
+    } catch (error) {
+      console.error(`[DeckService] Error updating deck ${deckId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Deletes a deck and all its associated cards
+   * @param deckId The deck ID to delete
+   */
+  async deleteDeck(deckId: string): Promise<void> {
+    console.log(`[DeckService] Deleting deck: ${deckId}`);
+    
+    // First verify the deck exists
+    await this.getDeckById(deckId);
+    
+    const deleteDeckStmt = db.prepare(`DELETE FROM decks WHERE id = ?`);
+    const deleteDeckCardsStmt = db.prepare(`DELETE FROM deck_cards WHERE deck_id = ?`);
+
+    // Use a transaction to ensure both deletions succeed
+    const transaction = db.transaction(() => {
+      // Delete deck cards first due to foreign key constraint
+      const cardsDeletionResult = deleteDeckCardsStmt.run(deckId);
+      console.log(`[DeckService] Deleted ${cardsDeletionResult.changes} deck card entries`);
+      
+      // Delete the deck
+      const deckDeletionResult = deleteDeckStmt.run(deckId);
+      if (deckDeletionResult.changes === 0) {
+        throw new Error(`Failed to delete deck ${deckId}`);
+      }
+      console.log(`[DeckService] Deleted deck ${deckId} successfully`);
+    });
+
+    try {
+      transaction();
+    } catch (error) {
+      console.error(`[DeckService] Error deleting deck ${deckId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets all cards in a deck with their quantities
+   * @param deckId The deck ID to get cards for
+   * @param includeSideboard Whether to include sideboard cards (default: false)
+   * @returns Array of deck cards with quantities
+   */
+  async getDeckCards(deckId: string, includeSideboard: boolean = false): Promise<DeckCard[]> {
+    console.log(`[DeckService] Getting cards for deck: ${deckId}, includeSideboard: ${includeSideboard}`);
+    
+    // First verify the deck exists
+    await this.getDeckById(deckId);
+    
+    try {
+      const query = includeSideboard
+        ? 'SELECT deck_id, card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id'
+        : 'SELECT deck_id, card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? AND is_sideboard = 0 ORDER BY card_id';
+      
+      const cardsQuery = db.prepare(query);
+      const cards = cardsQuery.all(deckId) as DeckCard[];
+      
+      console.log(`[DeckService] Found ${cards.length} cards in deck ${deckId}`);
+      return cards;
+    } catch (error) {
+      console.error(`[DeckService] Error getting cards for deck ${deckId}:`, error);
+      throw new Error(`Failed to retrieve cards for deck ${deckId}: ${(error as Error).message}`);
+    }
+  },
+
+  // Keep the existing createDeck method for backward compatibility, but mark as deprecated
+  /** @deprecated Use the new createDeck method with additional parameters */
+  async createDeckLegacy(deckId: string, playerId: string, name: string, cards: { cardId: string; quantity: number }[]): Promise<void> {
+    console.log(`[DeckService] Creating deck (legacy): ${name} (ID: ${deckId}) for player ${playerId}`);
     const insertDeckStmt = db.prepare(`
       INSERT INTO decks (id, player_id, name, format, description, created_at, updated_at)
       VALUES (@id, @player_id, @name, @format, @description, datetime('now'), datetime('now'))

@@ -16,7 +16,7 @@ import cardService, { CardSearchParams } from './services/cardService.js'; // Im
 import { generateDeck, DeckConfig } from './services/deckGenerationService.js'; // Import deck generation
 import path from 'path'; // Import path module
 import { fileURLToPath } from 'url'; // Added for __dirname
-import { initializeDatabase, getAllDecks, DeckBasicInfo } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo
+import { initializeDatabase, getAllDecks, DeckBasicInfo, db } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo, db
 import { DeckNotFoundError, DeckSelectionMissingError, DeckValidationError } from './errors/customErrors.js';
 
 // --- Define __filename and __dirname ---
@@ -472,6 +472,303 @@ app.get('/api/cards', (req: Request, res: Response): void => {
       } catch (error) {
         console.error('Error fetching all decks:', error);
         res.status(500).json({ message: 'Failed to fetch decks from the database.' });
+      }
+    });
+
+    // API endpoint to get a single deck by ID with all card details
+    app.get('/api/decks/:id', async (req: Request, res: Response): Promise<void> => {
+      try {
+        const deckId = req.params.id;
+        
+        if (!deckId || typeof deckId !== 'string') {
+          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          return;
+        }
+        
+        console.log(`[server]: Fetching deck details for ID: ${deckId}`);
+        
+        // Fetch deck info from decks table
+        const deckQuery = db.prepare('SELECT id, name, player_id, format, description, created_at, updated_at FROM decks WHERE id = ?');
+        const deckInfo = deckQuery.get(deckId) as DeckBasicInfo | undefined;
+        
+        if (!deckInfo) {
+          res.status(404).json({ message: `Deck with ID '${deckId}' not found.` });
+          return;
+        }
+        
+        // Fetch all card entries for this deck (including sideboard)
+        const cardsQuery = db.prepare('SELECT card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id');
+        const deckCards = cardsQuery.all(deckId) as { card_id: string; quantity: number; is_sideboard: number }[];
+        
+        // Separate mainboard and sideboard cards
+        const mainBoard = deckCards.filter(card => card.is_sideboard === 0).map(card => ({
+          cardId: card.card_id,
+          quantity: card.quantity
+        }));
+        
+        const sideBoard = deckCards.filter(card => card.is_sideboard === 1).map(card => ({
+          cardId: card.card_id,
+          quantity: card.quantity
+        }));
+        
+        const totalCards = mainBoard.reduce((sum, entry) => sum + entry.quantity, 0);
+        
+        res.json({
+          ...deckInfo,
+          mainBoard,
+          sideBoard,
+          totalCards
+        });
+      } catch (error) {
+        console.error(`[server]: Error fetching deck details for ${req.params.id}:`, error);
+        res.status(500).json({ message: 'Failed to fetch deck details from the database.' });
+      }
+    });
+
+    // API endpoint to create a new empty deck
+    app.post('/api/decks', (req: Request, res: Response): void => {
+      try {
+        const { name, playerId, format = 'standard', description = '' } = req.body;
+        
+        // Validate required parameters
+        if (!name || typeof name !== 'string' || name.trim().length === 0) {
+          res.status(400).json({ message: 'Deck name is required and must be a non-empty string.' });
+          return;
+        }
+        
+        if (!playerId || typeof playerId !== 'string') {
+          res.status(400).json({ message: 'Player ID is required and must be a string.' });
+          return;
+        }
+        
+        // Generate a unique deck ID
+        const deckId = `deck_${playerId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        console.log(`[server]: Creating new deck: ${name} (ID: ${deckId}) for player ${playerId}`);
+        
+        // Insert new deck into database
+        const insertDeckStmt = db.prepare(`
+          INSERT INTO decks (id, player_id, name, format, description, created_at, updated_at)
+          VALUES (@id, @player_id, @name, @format, @description, datetime('now'), datetime('now'))
+        `);
+        
+        const result = insertDeckStmt.run({
+          id: deckId,
+          player_id: playerId,
+          name: name.trim(),
+          format: format,
+          description: description
+        });
+        
+        if (result.changes === 0) {
+          res.status(500).json({ message: 'Failed to create deck in database.' });
+          return;
+        }
+        
+        // Return the created deck info
+        res.status(201).json({
+          id: deckId,
+          name: name.trim(),
+          player_id: playerId,
+          format: format,
+          description: description,
+          mainBoard: [],
+          sideBoard: [],
+          totalCards: 0,
+          message: 'Deck created successfully'
+        });
+      } catch (error) {
+        console.error('[server]: Error creating deck:', error);
+        res.status(500).json({ message: 'Failed to create deck due to internal error.' });
+      }
+    });
+
+    // API endpoint to update deck info and cards
+    app.put('/api/decks/:id', (req: Request, res: Response): void => {
+      try {
+        const deckId = req.params.id;
+        const { name, format, description, mainBoard = [], sideBoard = [] } = req.body;
+        
+        if (!deckId || typeof deckId !== 'string') {
+          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          return;
+        }
+        
+        console.log(`[server]: Updating deck: ${deckId}`);
+        
+        // Check if deck exists
+        const deckExistsQuery = db.prepare('SELECT id FROM decks WHERE id = ?');
+        const existingDeck = deckExistsQuery.get(deckId);
+        
+        if (!existingDeck) {
+          res.status(404).json({ message: `Deck with ID '${deckId}' not found.` });
+          return;
+        }
+        
+        // Validate card entries if provided
+        const validateCardEntries = (cards: any[], boardType: string) => {
+          if (!Array.isArray(cards)) {
+            throw new Error(`${boardType} must be an array.`);
+          }
+          
+          for (const entry of cards) {
+            if (!entry.cardId || typeof entry.cardId !== 'string') {
+              throw new Error(`${boardType} entry missing valid cardId.`);
+            }
+            if (!entry.quantity || typeof entry.quantity !== 'number' || entry.quantity <= 0) {
+              throw new Error(`${boardType} entry for card '${entry.cardId}' must have a positive quantity.`);
+            }
+          }
+        };
+        
+        validateCardEntries(mainBoard, 'MainBoard');
+        validateCardEntries(sideBoard, 'SideBoard');
+        
+        // Use transaction to ensure atomicity
+        const transaction = db.transaction(() => {
+          // Update deck info if provided
+          if (name || format !== undefined || description !== undefined) {
+            const updateFields = [];
+            const updateValues: any = { id: deckId };
+            
+            if (name && typeof name === 'string' && name.trim().length > 0) {
+              updateFields.push('name = @name');
+              updateValues.name = name.trim();
+            }
+            if (format !== undefined) {
+              updateFields.push('format = @format');
+              updateValues.format = format;
+            }
+            if (description !== undefined) {
+              updateFields.push('description = @description');
+              updateValues.description = description;
+            }
+            
+            updateFields.push("updated_at = datetime('now')");
+            
+            const updateDeckStmt = db.prepare(`UPDATE decks SET ${updateFields.join(', ')} WHERE id = @id`);
+            updateDeckStmt.run(updateValues);
+          }
+          
+          // Update cards if provided
+          if (mainBoard.length > 0 || sideBoard.length > 0) {
+            // Clear existing deck cards
+            const deleteDeckCardsStmt = db.prepare('DELETE FROM deck_cards WHERE deck_id = ?');
+            deleteDeckCardsStmt.run(deckId);
+            
+            // Insert new main board cards
+            const insertCardStmt = db.prepare(`
+              INSERT INTO deck_cards (deck_id, card_id, quantity, is_sideboard)
+              VALUES (@deck_id, @card_id, @quantity, @is_sideboard)
+            `);
+            
+            for (const entry of mainBoard) {
+              insertCardStmt.run({
+                deck_id: deckId,
+                card_id: entry.cardId,
+                quantity: entry.quantity,
+                is_sideboard: 0
+              });
+            }
+            
+            // Insert new sideboard cards
+            for (const entry of sideBoard) {
+              insertCardStmt.run({
+                deck_id: deckId,
+                card_id: entry.cardId,
+                quantity: entry.quantity,
+                is_sideboard: 1
+              });
+            }
+          }
+        });
+        
+        transaction();
+        
+        // Return updated deck info
+        const updatedDeckQuery = db.prepare('SELECT id, name, player_id, format, description, created_at, updated_at FROM decks WHERE id = ?');
+        const updatedDeck = updatedDeckQuery.get(deckId) as DeckBasicInfo;
+        
+        const cardsQuery = db.prepare('SELECT card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id');
+        const deckCards = cardsQuery.all(deckId) as { card_id: string; quantity: number; is_sideboard: number }[];
+        
+        const updatedMainBoard = deckCards.filter(card => card.is_sideboard === 0).map(card => ({
+          cardId: card.card_id,
+          quantity: card.quantity
+        }));
+        
+        const updatedSideBoard = deckCards.filter(card => card.is_sideboard === 1).map(card => ({
+          cardId: card.card_id,
+          quantity: card.quantity
+        }));
+        
+        const totalCards = updatedMainBoard.reduce((sum, entry) => sum + entry.quantity, 0);
+        
+        res.json({
+          ...updatedDeck,
+          mainBoard: updatedMainBoard,
+          sideBoard: updatedSideBoard,
+          totalCards,
+          message: 'Deck updated successfully'
+        });
+      } catch (error) {
+        console.error(`[server]: Error updating deck ${req.params.id}:`, error);
+        res.status(500).json({ 
+          message: 'Failed to update deck due to internal error.',
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    });
+
+    // API endpoint to delete a deck and its associated cards
+    app.delete('/api/decks/:id', (req: Request, res: Response): void => {
+      try {
+        const deckId = req.params.id;
+        
+        if (!deckId || typeof deckId !== 'string') {
+          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          return;
+        }
+        
+        console.log(`[server]: Deleting deck: ${deckId}`);
+        
+        // Check if deck exists first
+        const deckExistsQuery = db.prepare('SELECT id, name FROM decks WHERE id = ?');
+        const existingDeck = deckExistsQuery.get(deckId) as { id: string; name: string } | undefined;
+        
+        if (!existingDeck) {
+          res.status(404).json({ message: `Deck with ID '${deckId}' not found.` });
+          return;
+        }
+        
+        // Use transaction to ensure both deck and deck_cards are deleted atomically
+        const transaction = db.transaction(() => {
+          // Delete deck cards first (foreign key constraint)
+          const deleteDeckCardsStmt = db.prepare('DELETE FROM deck_cards WHERE deck_id = ?');
+          const cardDeletionResult = deleteDeckCardsStmt.run(deckId);
+          
+          // Delete the deck itself
+          const deleteDeckStmt = db.prepare('DELETE FROM decks WHERE id = ?');
+          const deckDeletionResult = deleteDeckStmt.run(deckId);
+          
+          return { cardChanges: cardDeletionResult.changes, deckChanges: deckDeletionResult.changes };
+        });
+        
+        const result = transaction();
+        
+        if (result.deckChanges === 0) {
+          res.status(500).json({ message: 'Failed to delete deck from database.' });
+          return;
+        }
+        
+        res.json({ 
+          message: `Deck '${existingDeck.name}' (ID: ${deckId}) deleted successfully`,
+          deletedDeckId: deckId,
+          deletedCardEntries: result.cardChanges
+        });
+      } catch (error) {
+        console.error(`[server]: Error deleting deck ${req.params.id}:`, error);
+        res.status(500).json({ message: 'Failed to delete deck due to internal error.' });
       }
     });
 

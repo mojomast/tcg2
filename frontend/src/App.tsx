@@ -6,6 +6,7 @@ import ActionControls from './components/ActionControls';
 import PlayerHUD from './components/PlayerHUD';
 import GameBoardInfo from './components/GameBoardInfo';
 import HandDisplay from './components/HandDisplay';
+import DeckEditorPanel from './components/DeckEditorPanel';
 import { startGame, passPriorityService } from './services/gameService';
 import { GameState } from './types/gameState';
 
@@ -14,6 +15,7 @@ function App() {
   const [gameData, setGameData] = useState<GameState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDeckEditorVisible, setIsDeckEditorVisible] = useState(false);
 
   const handleStartGame = async () => {
     setIsLoading(true);
@@ -48,6 +50,14 @@ function App() {
     }
   };
 
+  const handleOpenDeckEditor = () => {
+    setIsDeckEditorVisible(true);
+  };
+
+  const handleCloseDeckEditor = () => {
+    setIsDeckEditorVisible(false);
+  };
+
   return (
     <>
       <div>
@@ -62,6 +72,21 @@ function App() {
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
           count is {count}
+        </button>
+        <button 
+          onClick={handleOpenDeckEditor}
+          style={{
+            marginLeft: '1rem',
+            padding: '0.6rem 1.2rem',
+            backgroundColor: '#667eea',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: '600'
+          }}
+        >
+          Open Deck Editor
         </button>
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR
@@ -129,6 +154,11 @@ function App() {
       <p className="read-the-docs">
         Click on the Vite and React logos to learn more
       </p>
+      
+      <DeckEditorPanel 
+        isVisible={isDeckEditorVisible}
+        onClose={handleCloseDeckEditor}
+      />
     </>
   );
 }

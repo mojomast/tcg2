@@ -1,19 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import apiService from '../services/apiService'; // Import the new service
+import apiService, { DeckBasicInfo, DeckDetails, DeckCardEntry } from '../services/apiService'; // Import the service and types
 import CardSearchPanel from './CardSearchPanel';
 import GenerateDeckModal from './GenerateDeckModal';
 import './Deckbuilder.css';
-
-// Define DeckBasicInfo interface locally for frontend use
-interface DeckBasicInfo {
-  id: string;
-  name: string;
-  player_id: string; 
-  format?: string;
-  description?: string;
-  created_at: string; 
-  updated_at: string; 
-}
 
 interface DeckbuilderProps {
   onBack: () => void;
@@ -25,6 +14,11 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
   const [error, setError] = useState<string | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [generationSuccess, setGenerationSuccess] = useState<string | null>(null);
+  
+  // State for selected deck
+  const [selectedDeck, setSelectedDeck] = useState<DeckDetails | null>(null);
+  const [loadingDeck, setLoadingDeck] = useState<boolean>(false);
+  const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
 
   // Function to refresh the decks list
   const refreshDecks = async () => {
@@ -58,6 +52,22 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
     }, 5000);
   };
 
+  // Function to handle deck selection and loading
+  const handleDeckSelect = async (deck: DeckBasicInfo) => {
+    try {
+      setLoadingDeck(true);
+      setDeckLoadError(null);
+      
+      const deckDetails = await apiService.getDeckById(deck.id);
+      setSelectedDeck(deckDetails);
+    } catch (err: any) {
+      setDeckLoadError(err.message || 'Failed to load deck details.');
+      console.error('Error loading deck:', err);
+    } finally {
+      setLoadingDeck(false);
+    }
+  };
+
   return (
     <div className="deckbuilder-container">
       <div className="deckbuilder-header">
@@ -76,7 +86,17 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
             decks.length > 0 ? (
               <ul>
                 {decks.map((deck) => (
-                  <li key={deck.id} onClick={() => console.log('Load deck:', deck.name)} style={{cursor: 'pointer'}}>
+                  <li 
+                    key={deck.id} 
+                    onClick={() => handleDeckSelect(deck)} 
+                    style={{
+                      cursor: 'pointer',
+                      padding: '8px',
+                      borderRadius: '4px',
+                      backgroundColor: selectedDeck?.id === deck.id ? '#e7f3ff' : 'transparent',
+                      border: selectedDeck?.id === deck.id ? '1px solid #007bff' : '1px solid transparent'
+                    }}
+                  >
                     {deck.name} (ID: {deck.id.substring(0,8)}) - Last Updated: {new Date(deck.updated_at).toLocaleDateString()}
                   </li>
                 ))}
@@ -102,9 +122,86 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
         </div>
 
         <div className="deck-editor-panel">
-          <h2>Current Deck: [Deck Name]</h2>
-          <p>Cards in the current deck will appear here.</p>
-          <button>Save Deck</button>
+          {loadingDeck && (
+            <div style={{ padding: '20px', textAlign: 'center' }}>
+              <p>Loading deck details...</p>
+            </div>
+          )}
+          
+          {deckLoadError && (
+            <div style={{ padding: '20px', color: 'red' }}>
+              <p>Error loading deck: {deckLoadError}</p>
+            </div>
+          )}
+          
+          {selectedDeck ? (
+            <div>
+              <h2>Current Deck: {selectedDeck.name}</h2>
+              <div style={{ marginBottom: '16px' }}>
+                <p><strong>Total Cards:</strong> {selectedDeck.totalCards}</p>
+                <p><strong>Format:</strong> {selectedDeck.format || 'Standard'}</p>
+                {selectedDeck.description && (
+                  <p><strong>Description:</strong> {selectedDeck.description}</p>
+                )}
+              </div>
+              
+              {/* Main Board */}
+              <div style={{ marginBottom: '20px' }}>
+                <h3>Main Board ({selectedDeck.mainBoard.reduce((total, entry) => total + entry.quantity, 0)} cards)</h3>
+                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #ddd', padding: '8px' }}>
+                  {selectedDeck.mainBoard.length > 0 ? (
+                    selectedDeck.mainBoard.map((entry, index) => (
+                      <div key={`${entry.cardId}-${index}`} style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        padding: '4px 8px',
+                        borderBottom: '1px solid #eee'
+                      }}>
+                        <span>{entry.card.name}</span>
+                        <span>x{entry.quantity}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ fontStyle: 'italic', color: '#666' }}>No cards in main board</p>
+                  )}
+                </div>
+              </div>
+              
+              {/* Side Board */}
+              {selectedDeck.sideBoard.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <h3>Side Board ({selectedDeck.sideBoard.reduce((total, entry) => total + entry.quantity, 0)} cards)</h3>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #ddd', padding: '8px' }}>
+                    {selectedDeck.sideBoard.map((entry, index) => (
+                      <div key={`${entry.cardId}-${index}`} style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        padding: '4px 8px',
+                        borderBottom: '1px solid #eee'
+                      }}>
+                        <span>{entry.card.name}</span>
+                        <span>x{entry.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              <button style={{
+                padding: '8px 16px',
+                backgroundColor: '#007bff',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}>Save Deck</button>
+            </div>
+          ) : (
+            <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
+              <h2>Current Deck</h2>
+              <p>Select a deck from the list to view and edit its contents.</p>
+            </div>
+          )}
         </div>
 
         <div className="card-search-panel">
