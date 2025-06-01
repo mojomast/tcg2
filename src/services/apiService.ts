@@ -69,6 +69,14 @@ interface DeckCardEntry {
   card: Card;
 }
 
+// Interface for the payload when saving a deck
+interface DeckSavePayload {
+  name: string;
+  description?: string;
+  mainBoard: DeckEntry[];
+  sideBoard: DeckEntry[];
+}
+
 const API_BASE_URL = '/api'; // Assuming your API routes are prefixed with /api
 
 export const apiService = {
@@ -195,12 +203,36 @@ export const apiService = {
     }
   },
 
+  /**
+   * Saves changes to an existing deck.
+   */
+  async saveDeck(deckId: string, payload: DeckSavePayload): Promise<DeckDetails> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/decks/${deckId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to save deck and parse error response' }));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      const updatedDeck: DeckDetails = await response.json();
+      return updatedDeck;
+    } catch (error) {
+      console.error(`Error saving deck ${deckId}:`, error);
+      throw error;
+    }
+  },
+
   // Future API functions can be added here, e.g.:
-  // async saveDeck(deckData: DeckData): Promise<DeckBasicInfo> { ... }
   // async getCards(page: number, pageSize: number): Promise<PaginatedCardsResponse> { ... }
 };
 
 // Export interfaces for use in components
-export type { DeckBasicInfo, DeckDetails, DeckCardEntry, Card };
+export type { DeckBasicInfo, DeckDetails, DeckCardEntry, Card, DeckSavePayload, DeckEntry };
 
 export default apiService;

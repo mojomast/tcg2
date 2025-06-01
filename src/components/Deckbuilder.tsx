@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import apiService, { DeckBasicInfo, DeckDetails, DeckCardEntry } from '../services/apiService'; // Import the service and types
+import apiService, { DeckBasicInfo, DeckDetails, DeckCardEntry, Card, DeckSavePayload, DeckEntry } from '../services/apiService'; // Import the service and types
 import CardSearchPanel from './CardSearchPanel';
 import GenerateDeckModal from './GenerateDeckModal';
 import './Deckbuilder.css';
@@ -14,11 +14,17 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
   const [error, setError] = useState<string | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [generationSuccess, setGenerationSuccess] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   
   // State for selected deck
   const [selectedDeck, setSelectedDeck] = useState<DeckDetails | null>(null);
   const [loadingDeck, setLoadingDeck] = useState<boolean>(false);
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
+
+  // State for saving deck
+  const [isSavingDeck, setIsSavingDeck] = useState<boolean>(false);
+  const [saveDeckSuccess, setSaveDeckSuccess] = useState<string | null>(null);
+  const [saveDeckError, setSaveDeckError] = useState<string | null>(null);
 
   // Function to refresh the decks list
   const refreshDecks = async () => {
@@ -39,20 +45,65 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
     refreshDecks();
   }, []); // Empty dependency array means this runs once on mount
 
-  const handleGenerateDeck = (params: any) => {
-    console.log('Deck generated with params:', params);
-    setGenerationSuccess(`Deck "${params.deckName}" generated successfully!`);
+interface GenerationResult {
+  success: boolean;
+  deckName?: string;
+  message?: string;
+}
+
+  const handleGenerateDeck = (result: GenerationResult) => {
     setShowGenerateModal(false);
-    // Refresh the decks list to show the new deck
-    refreshDecks();
+    setGenerationSuccess(null);
+    setGenerationError(null);
+
+    if (result.success && result.deckName) {
+      setGenerationSuccess(result.message || `Deck "${result.deckName}" generated successfully!`);
+      refreshDecks();
     
-    // Clear success message after 5 seconds
-    setTimeout(() => {
-      setGenerationSuccess(null);
-    }, 5000);
+      setTimeout(() => {
+        setGenerationSuccess(null);
+      }, 5000);
+    } else {
+      setGenerationError(result.message || 'Failed to generate deck.');
+      setTimeout(() => {
+        setGenerationError(null);
+      }, 7000); // Clear error after 7 seconds
+    }
   };
 
   // Function to handle deck selection and loading
+
+  const handleAddCardToDeck = (cardToAdd: Card, board: 'mainBoard' | 'sideBoard') => {
+    if (!selectedDeck) return;
+
+    // Create a deep copy of the selectedDeck to avoid direct state mutation
+    // Note: JSON.parse(JSON.stringify()) is a simple deep clone but has limitations (e.g. with Date objects, functions).
+    // For this data structure, it should be acceptable.
+    const newSelectedDeck: DeckDetails = JSON.parse(JSON.stringify(selectedDeck));
+    
+    const targetBoard = newSelectedDeck[board];
+    // Ensure card objects within DeckCardEntry are compared by ID
+    const existingEntryIndex = targetBoard.findIndex(entry => entry.card && entry.card.id === cardToAdd.id);
+
+    if (existingEntryIndex > -1) {
+      // Card exists, increment quantity
+      targetBoard[existingEntryIndex].quantity += 1;
+    } else {
+      // Card is new, add new DeckCardEntry
+      targetBoard.push({
+        cardId: cardToAdd.id, // Ensure cardId is populated correctly
+        card: cardToAdd, 
+        quantity: 1 
+      });
+    }
+    
+    // Optional: Recalculate totalCards if it's a displayed property and needs to be exact
+    // newSelectedDeck.totalCards = (newSelectedDeck.mainBoard.reduce((sum, entry) => sum + entry.quantity, 0)) +
+    //                              (newSelectedDeck.sideBoard.reduce((sum, entry) => sum + entry.quantity, 0));
+
+    setSelectedDeck(newSelectedDeck);
+  };
+
   const handleDeckSelect = async (deck: DeckBasicInfo) => {
     try {
       setLoadingDeck(true);
@@ -65,6 +116,45 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
       console.error('Error loading deck:', err);
     } finally {
       setLoadingDeck(false);
+    }
+  };
+
+
+  // Function to handle saving the currently selected deck
+  const handleSaveDeck = async () => {
+    if (!selectedDeck) {
+      setSaveDeckError("No deck selected to save.");
+      setTimeout(() => setSaveDeckError(null), 5000);
+      return;
+    }
+
+    setIsSavingDeck(true);
+    setSaveDeckSuccess(null);
+    setSaveDeckError(null);
+
+    try {
+      const payload: DeckSavePayload = {
+        name: selectedDeck.name,
+        description: selectedDeck.description, // Ensure description is handled if undefined by payload type
+        mainBoard: selectedDeck.mainBoard.map(entry => ({ cardId: entry.card.id, quantity: entry.quantity }) as DeckEntry),
+        sideBoard: selectedDeck.sideBoard.map(entry => ({ cardId: entry.card.id, quantity: entry.quantity }) as DeckEntry),
+      };
+
+      const updatedDeck = await apiService.saveDeck(selectedDeck.id, payload);
+      setSelectedDeck(updatedDeck); // Update with response from server
+      setSaveDeckSuccess('Deck saved successfully!');
+      // Refresh deck list if name might have changed or to reflect updated_at sort order if any
+      if (selectedDeck.name !== updatedDeck.name || selectedDeck.description !== updatedDeck.description) {
+        refreshDecks(); 
+      }
+      
+      setTimeout(() => setSaveDeckSuccess(null), 5000);
+    } catch (err: any) {
+      setSaveDeckError(err.message || 'Failed to save deck.');
+      console.error('Error saving deck:', err);
+      setTimeout(() => setSaveDeckError(null), 7000);
+    } finally {
+      setIsSavingDeck(false);
     }
   };
 
@@ -187,14 +277,21 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
                 </div>
               )}
               
-              <button style={{
-                padding: '8px 16px',
-                backgroundColor: '#007bff',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}>Save Deck</button>
+              <button 
+                onClick={handleSaveDeck}
+                disabled={isSavingDeck || !selectedDeck}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: (isSavingDeck || !selectedDeck) ? '#ccc' : '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: (isSavingDeck || !selectedDeck) ? 'not-allowed' : 'pointer',
+                  minWidth: '100px' // To prevent layout shift when text changes
+                }}
+              >
+                {isSavingDeck ? 'Saving...' : 'Save Deck'}
+              </button>
             </div>
           ) : (
             <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
@@ -206,10 +303,8 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
 
         <div className="card-search-panel">
           <CardSearchPanel 
-            onCardSelect={(card) => {
-              console.log('Card selected:', card.name);
-              // TODO: Add card to current deck
-            }}
+            onAddCardToDeck={handleAddCardToDeck}
+            selectedColors={selectedDeck && (selectedDeck as any).colors ? (selectedDeck as any).colors : []} 
           />
         </div>
       </div>
@@ -237,6 +332,60 @@ const Deckbuilder: React.FC<DeckbuilderProps> = ({ onBack }) => {
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
           ✅ {generationSuccess}
+        </div>
+      )}
+
+      {/* Generation Error Message */}
+      {generationError && (
+        <div style={{
+          position: 'fixed',
+          top: '80px', // Adjust position to not overlap success message
+          right: '20px',
+          backgroundColor: '#f8d7da', // Reddish for error
+          color: '#721c24',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          border: '1px solid #f5c6cb',
+          zIndex: 1001,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          ❌ Error: {generationError}
+        </div>
+      )}
+
+      {/* Save Deck Success Message */}
+      {saveDeckSuccess && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '20px',
+          backgroundColor: '#d4edda',
+          color: '#155724',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          border: '1px solid #c3e6cb',
+          zIndex: 1001,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          ✅ {saveDeckSuccess}
+        </div>
+      )}
+
+      {/* Save Deck Error Message */}
+      {saveDeckError && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px', // Position above success message
+          left: '20px',
+          backgroundColor: '#f8d7da',
+          color: '#721c24',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          border: '1px solid #f5c6cb',
+          zIndex: 1001,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          ❌ Error: {saveDeckError}
         </div>
       )}
     </div>

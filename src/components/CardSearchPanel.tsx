@@ -16,7 +16,7 @@ interface Card {
 }
 
 interface CardSearchPanelProps {
-  onCardSelect: (card: Card) => void;
+  onAddCardToDeck: (card: Card, board: 'mainBoard' | 'sideBoard') => void;
   selectedColors?: string[];
 }
 
@@ -28,7 +28,7 @@ interface SearchFilters {
   rarity: string;
 }
 
-const CardSearchPanel: React.FC<CardSearchPanelProps> = ({ onCardSelect, selectedColors = [] }) => {
+const CardSearchPanel: React.FC<CardSearchPanelProps> = ({ onAddCardToDeck, selectedColors = [] }) => {
   const [cards, setCards] = useState<Card[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,15 +272,17 @@ const CardSearchPanel: React.FC<CardSearchPanelProps> = ({ onCardSelect, selecte
         {cards.map((card) => (
           <div
             key={card.id}
-            onClick={() => onCardSelect(card)}
+            // onClick removed, buttons will handle interaction
             style={{
               border: '1px solid #ddd',
               borderRadius: '8px',
               padding: '12px',
-              cursor: 'pointer',
+              // cursor: 'pointer', // No longer needed on main div
               backgroundColor: 'white',
               transition: 'all 0.2s',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              display: 'flex', // Added for layout of content and buttons
+              flexDirection: 'column' // Added for layout
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
@@ -311,6 +313,21 @@ const CardSearchPanel: React.FC<CardSearchPanelProps> = ({ onCardSelect, selecte
                 }
               </div>
             )}
+            {/* Add to Deck Buttons */}
+            <div style={{ marginTop: 'auto', paddingTop: '8px', display: 'flex', justifyContent: 'space-around', borderTop: '1px solid #eee' }}>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onAddCardToDeck(card, 'mainBoard'); }}
+                style={{ fontSize: '12px', padding: '6px 10px', cursor: 'pointer', backgroundColor: '#e0e0e0', border: '1px solid #ccc', borderRadius: '4px' }}
+              >
+                Add to Main
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onAddCardToDeck(card, 'sideBoard'); }}
+                style={{ fontSize: '12px', padding: '6px 10px', cursor: 'pointer', backgroundColor: '#e0e0e0', border: '1px solid #ccc', borderRadius: '4px' }}
+              >
+                Add to Side
+              </button>
+            </div>
           </div>
         ))}
       </div>

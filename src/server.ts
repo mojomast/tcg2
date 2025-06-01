@@ -8,15 +8,16 @@ import express, { Express, Request, Response } from 'express';
 import http from 'http'; 
 import { Server, Socket } from 'socket.io'; 
 import { GameEngine } from './game/gameEngine.js'; 
+import { DeckDetails, DeckCardEntry, DeckBasicInfo } from './services/apiService.js'; 
 import { PlayerId, EventType, GameEvent } from './interfaces/gameState.js'; // Import PlayerId and EventType
 import { Card, CardType } from './interfaces/card.js'; // Import Card for decklists
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from './config/constants.js'; // Import constants
-import deckService from './services/deckService.js'; // Assuming DeckService is default export
-import cardService, { CardSearchParams } from './services/cardService.js'; // Import CardService and interface
-import { generateDeck, DeckConfig } from './services/deckGenerationService.js'; // Import deck generation
+import cardService, { type CardSearchParams } from './services/cardService.js';
+import deckService from './services/deckService.js';
+import { generateDeck as generateDeckAndReturnId, type DeckConfig } from './services/deckGenerationService.js';
 import path from 'path'; // Import path module
 import { fileURLToPath } from 'url'; // Added for __dirname
-import { initializeDatabase, getAllDecks, DeckBasicInfo, db } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo, db
+import { initializeDatabase, getAllDecks, db } from './db/database.js'; // Import database initializer, getAllDecks, DeckBasicInfo, db
 import { DeckNotFoundError, DeckSelectionMissingError, DeckValidationError } from './errors/customErrors.js';
 
 // --- Define __filename and __dirname ---
@@ -584,13 +585,13 @@ app.get('/api/cards', (req: Request, res: Response): void => {
     });
 
     // API endpoint to update deck info and cards
-    app.put('/api/decks/:id', (req: Request, res: Response): void => {
+    app.put('/api/decks/:id', async (req: Request, res: Response): Promise<void> => {
       try {
         const deckId = req.params.id;
         const { name, format, description, mainBoard = [], sideBoard = [] } = req.body;
         
         if (!deckId || typeof deckId !== 'string') {
-          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          res.status(400).json({ message: 'Deck ID is required and must be a string.', errorType: 'ValidationError', details: { field: 'deckId', issue: 'Deck ID must be provided in the URL path and be a string.'} });
           return;
         }
         
@@ -601,7 +602,7 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         const existingDeck = deckExistsQuery.get(deckId);
         
         if (!existingDeck) {
-          res.status(404).json({ message: `Deck with ID '${deckId}' not found.` });
+          res.status(404).json({ message: `Deck with ID '${deckId}' not found.`, errorType: 'DeckNotFoundError', details: { deckId: deckId } });
           return;
         }
         
@@ -624,99 +625,60 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         validateCardEntries(mainBoard, 'MainBoard');
         validateCardEntries(sideBoard, 'SideBoard');
         
-        // Use transaction to ensure atomicity
-        const transaction = db.transaction(() => {
-          // Update deck info if provided
-          if (name || format !== undefined || description !== undefined) {
-            const updateFields = [];
-            const updateValues: any = { id: deckId };
-            
-            if (name && typeof name === 'string' && name.trim().length > 0) {
-              updateFields.push('name = @name');
-              updateValues.name = name.trim();
-            }
-            if (format !== undefined) {
-              updateFields.push('format = @format');
-              updateValues.format = format;
-            }
-            if (description !== undefined) {
-              updateFields.push('description = @description');
-              updateValues.description = description;
-            }
-            
-            updateFields.push("updated_at = datetime('now')");
-            
-            const updateDeckStmt = db.prepare(`UPDATE decks SET ${updateFields.join(', ')} WHERE id = @id`);
-            updateDeckStmt.run(updateValues);
-          }
-          
-          // Update cards if provided
-          if (mainBoard.length > 0 || sideBoard.length > 0) {
-            // Clear existing deck cards
-            const deleteDeckCardsStmt = db.prepare('DELETE FROM deck_cards WHERE deck_id = ?');
-            deleteDeckCardsStmt.run(deckId);
-            
-            // Insert new main board cards
-            const insertCardStmt = db.prepare(`
-              INSERT INTO deck_cards (deck_id, card_id, quantity, is_sideboard)
-              VALUES (@deck_id, @card_id, @quantity, @is_sideboard)
-            `);
-            
-            for (const entry of mainBoard) {
-              insertCardStmt.run({
-                deck_id: deckId,
-                card_id: entry.cardId,
-                quantity: entry.quantity,
-                is_sideboard: 0
-              });
-            }
-            
-            // Insert new sideboard cards
-            for (const entry of sideBoard) {
-              insertCardStmt.run({
-                deck_id: deckId,
-                card_id: entry.cardId,
-                quantity: entry.quantity,
-                is_sideboard: 1
-              });
-            }
-          }
-        });
-        
-        transaction();
-        
-        // Return updated deck info
-        const updatedDeckQuery = db.prepare('SELECT id, name, player_id, format, description, created_at, updated_at FROM decks WHERE id = ?');
-        const updatedDeck = updatedDeckQuery.get(deckId) as DeckBasicInfo;
-        
-        const cardsQuery = db.prepare('SELECT card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id');
-        const deckCards = cardsQuery.all(deckId) as { card_id: string; quantity: number; is_sideboard: number }[];
-        
-        const updatedMainBoard = deckCards.filter(card => card.is_sideboard === 0).map(card => ({
-          cardId: card.card_id,
-          quantity: card.quantity
-        }));
-        
-        const updatedSideBoard = deckCards.filter(card => card.is_sideboard === 1).map(card => ({
-          cardId: card.card_id,
-          quantity: card.quantity
-        }));
-        
-        const totalCards = updatedMainBoard.reduce((sum, entry) => sum + entry.quantity, 0);
-        
-        res.json({
-          ...updatedDeck,
-          mainBoard: updatedMainBoard,
-          sideBoard: updatedSideBoard,
-          totalCards,
-          message: 'Deck updated successfully'
-        });
+        // Delegate to DeckService for updating and fetching details
+        const updatedDeckDetails = await deckService.updateDeck(deckId, name, description, mainBoard, sideBoard);
+        res.json(updatedDeckDetails);
       } catch (error) {
         console.error(`[server]: Error updating deck ${req.params.id}:`, error);
-        res.status(500).json({ 
-          message: 'Failed to update deck due to internal error.',
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        if (error instanceof DeckNotFoundError) {
+          res.status(404).json({ message: error.message, errorType: 'DeckNotFoundError', details: { deckId: error.deckId } });
+        } else if (error instanceof DeckValidationError) {
+          res.status(400).json({ message: error.message, errorType: 'DeckValidationError', details: { deckId: error.deckId, errors: error.validationErrors } });
+        } else if (error instanceof Error && (error.message.includes('MainBoard entry') || error.message.includes('SideBoard entry'))) {
+          // Catch errors from validateCardEntries
+          res.status(400).json({ message: error.message, errorType: 'ValidationError', details: { context: 'cardEntries' } });
+        } else {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to update deck due to an internal error.';
+          res.status(500).json({
+            message: errorMessage,
+            errorType: 'InternalServerError'
+          });
+        }
+        // Ensure DeckNotFoundError and DeckValidationError are imported or defined
+      }
+    });
+
+    // API endpoint to get a specific deck by ID with full details
+    app.get('/api/decks/:id', async (req: Request, res: Response): Promise<void> => {
+      const { id } = req.params;
+      const playerId = req.query.playerId as string; // Assuming playerId might be needed for authorization in future
+
+      if (!playerId) { // Basic check, real auth would be more robust
+        res.status(400).json({ message: 'Player ID is required as a query parameter.', errorType: 'ValidationError', details: { field: 'playerId', issue: 'Player ID must be provided as a query parameter.' } });
+        return;
+      }
+
+      try {
+        console.log(`[server] GET /api/decks/${id} called by player ${playerId}`);
+        const deckDetails: DeckDetails = await deckService.getDeckById(id);
+
+        // Optional: Add authorization check here if decks are player-specific
+        if (deckDetails.player_id !== playerId) {
+          res.status(403).json({ message: 'Forbidden: You do not have access to this deck.', errorType: 'AuthorizationError' });
+          return;
+        }
+
+        res.json(deckDetails);
+      } catch (error) {
+        if (error instanceof DeckNotFoundError) {
+          console.warn(`[server] Deck not found for ID ${id}:`, error.message);
+          res.status(404).json({ message: error.message, errorType: 'DeckNotFoundError', details: { deckId: error.deckId } });
+          return;
+        }
+        console.error(`[server] Error fetching deck ${id}:`, error);
+        // It's good practice to hide internal error details from the client
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred.';
+        res.status(500).json({ message: `Failed to retrieve deck: ${errorMessage}`, errorType: 'InternalServerError' });
       }
     });
 
@@ -726,7 +688,7 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         const deckId = req.params.id;
         
         if (!deckId || typeof deckId !== 'string') {
-          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          res.status(400).json({ message: 'Deck ID is required and must be a string.', errorType: 'ValidationError', details: { field: 'deckId', issue: 'Deck ID must be provided in the URL path and be a string.'} });
           return;
         }
         
@@ -737,7 +699,7 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         const existingDeck = deckExistsQuery.get(deckId) as { id: string; name: string } | undefined;
         
         if (!existingDeck) {
-          res.status(404).json({ message: `Deck with ID '${deckId}' not found.` });
+          res.status(404).json({ message: `Deck with ID '${deckId}' not found.`, errorType: 'DeckNotFoundError', details: { deckId: deckId } });
           return;
         }
         
@@ -757,7 +719,7 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         const result = transaction();
         
         if (result.deckChanges === 0) {
-          res.status(500).json({ message: 'Failed to delete deck from database.' });
+          res.status(500).json({ message: 'Failed to delete deck from database.', errorType: 'InternalServerError', details: { context: 'Database operation failed to reflect changes for deck deletion.'} });
           return;
         }
         
@@ -768,64 +730,83 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         });
       } catch (error) {
         console.error(`[server]: Error deleting deck ${req.params.id}:`, error);
-        res.status(500).json({ message: 'Failed to delete deck due to internal error.' });
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete deck due to an internal server error.';
+        res.status(500).json({ message: errorMessage, errorType: 'InternalServerError' });
       }
     });
 
     // API endpoint to generate a new deck
     app.post('/api/generate-deck', async (req: Request, res: Response): Promise<void> => {
       try {
-        const {
-          colors,
-          totalCards = 60,
-          landRatio = 0.4,
-          creatureRatio = 0.35,
-          spellRatio = 0.25,
-          deckName,
-          playerId
-        } = req.body;
-        
-        // Validate required parameters
-        if (!colors || !Array.isArray(colors) || colors.length === 0) {
-          res.status(400).json({ message: 'Colors array is required and must not be empty.' });
-          return;
-        }
-        
-        if (!playerId || typeof playerId !== 'string') {
-          res.status(400).json({ message: 'Player ID is required and must be a string.' });
-          return;
-        }
-        
-        console.log(`[server]: Generating deck for player ${playerId} with colors ${colors.join(', ')}`);
-        
-        const config: DeckConfig = {
+        const { 
           colors,
           totalCards,
           landRatio,
           creatureRatio,
           spellRatio,
+          // deckName, // deckName from payload is currently overridden by deckGenerationService
           playerId
+        } = req.body;
+
+        // Basic validation (can be expanded)
+        if (!colors || !Array.isArray(colors) || colors.length === 0) {
+          res.status(400).json({ message: 'Colors array is required.', errorType: 'ValidationError', details: { field: 'colors', issue: 'Colors array must be provided and non-empty.'} });
+          return;
+        }
+        if (!playerId || typeof playerId !== 'string') {
+          res.status(400).json({ message: 'Player ID is required and must be a string.', errorType: 'ValidationError', details: { field: 'playerId', issue: 'Player ID must be provided as a string.'} });
+          return;
+        }
+
+        const config: DeckConfig = {
+          colors,
+          totalCards: totalCards || 60,
+          landRatio: landRatio || 0.4,
+          creatureRatio: creatureRatio || 0.35,
+          spellRatio: spellRatio || 0.25,
+          playerId: playerId,
         };
+
+        console.log(`[server]: Generating deck with config:`, config);
         
-        const generatedDeck = await generateDeck(config);
-        
-        res.json({
+        // Assuming deckGenerationService.generateDeck is updated to return an object like { generatedDeck: GeneratedDeck, deckId: string }
+        // This change needs to be made in deckGenerationService.ts
+        const { generatedDeck, deckId } = await generateDeckAndReturnId(config);
+
+        if (!deckId) {
+          console.error('[server]: Deck generation did not return a deckId.');
+          throw new Error('Deck generation failed to provide a deck ID.');
+        }
+
+        // Fetch full DeckDetails for the response, as the service returns DeckDetails
+        const newDeckDetails = await deckService.getDeckById(deckId);
+
+        if (!newDeckDetails) {
+          // This case should ideally be caught by getDeckById throwing DeckNotFoundError
+          console.error(`[server]: Newly generated deck with ID ${deckId} could not be fetched.`);
+          throw new DeckNotFoundError(`Newly generated deck with ID ${deckId} could not be fetched.`, deckId);
+        }
+
+        res.status(201).json({
           success: true,
-          deck: {
-            name: deckName || generatedDeck.deckName,
-            colors,
-            totalCards: generatedDeck.mainBoard.reduce((sum, entry) => sum + entry.quantity, 0),
-            mainBoard: generatedDeck.mainBoard,
-            sideBoard: generatedDeck.sideBoard || []
-          },
-          message: 'Deck generated successfully'
+          message: `Deck "${newDeckDetails.name}" generated and saved successfully.`,
+          deck: newDeckDetails
         });
+
       } catch (error) {
         console.error('[server]: Error generating deck:', error);
-        res.status(500).json({ 
-          message: 'Failed to generate deck due to internal error.',
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        if (error instanceof DeckNotFoundError) {
+          res.status(404).json({ message: error.message, errorType: 'DeckNotFoundError', details: { deckId: error.deckId } });
+        } else if (error instanceof DeckValidationError) { 
+          res.status(400).json({ message: error.message, errorType: 'DeckValidationError', details: { deckId: error.deckId, errors: error.validationErrors } });
+        } else {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to generate deck due to an internal error.';
+          res.status(500).json({ 
+            message: errorMessage,
+            errorType: 'InternalServerError'
+            // Optionally, add more sanitized details here if appropriate for internal errors
+          });
+        }
       }
     });
 
@@ -835,7 +816,7 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         const { deckId } = req.body;
         
         if (!deckId || typeof deckId !== 'string') {
-          res.status(400).json({ message: 'Deck ID is required and must be a string.' });
+          res.status(400).json({ message: 'Deck ID is required and must be a string.', errorType: 'ValidationError', details: { field: 'deckId', issue: 'Deck ID must be provided in the request body and be a string.'} });
           return;
         }
         
@@ -865,28 +846,33 @@ app.get('/api/cards', (req: Request, res: Response): void => {
             
             if (error instanceof DeckNotFoundError) {
               res.status(404).json({ 
-                message: `Deck with ID '${deckId}' not found.`,
-                deckId: deckId,
-                valid: false,
-                errors: [`Deck '${deckId}' does not exist.`]
+                message: `Deck with ID '${deckId}' not found.`, 
+                errorType: 'DeckNotFoundError', 
+                details: { 
+                  deckId: deckId, 
+                  valid: false, 
+                  errors: [`Deck '${deckId}' does not exist.`] 
+                }
               });
             } else {
+              const errMessage = error instanceof Error ? error.message : 'Failed to validate deck due to internal error.';
               res.status(500).json({ 
-                message: 'Failed to validate deck due to internal error.',
-                deckId: deckId,
-                valid: false,
-                errors: ['Internal server error during validation.']
+                message: errMessage,
+                errorType: 'InternalServerError',
+                details: { 
+                  deckId: deckId, // deckId might be undefined if error occurred before it was parsed
+                  valid: false, 
+                  errors: ['Internal server error during validation.']
+                }
               });
-            }
-          });
-      } catch (error) {
-        console.error('[server]: Error in validate-deck endpoint:', error);
-        res.status(500).json({ message: 'Failed to validate deck.' });
+            } // Closes else block of .catch
+          }) // Closes .catch(error => { ... })
+      } catch (error) { // Outer catch for the route handler
+        console.error('[server]: Error in /api/validate-deck endpoint:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred processing deck validation request.';
+        res.status(500).json({ message: errorMessage, errorType: 'InternalServerError' });
       }
-    });
-
-    // --- REAL GAME ENGINE INITIALIZATION ---
-    console.log('[server]: Initializing real GameEngine for gameplay.');
+    }); // Closes app.post('/api/validate-deck', ...)
     
     // Placeholder for initializing the first test game
     // NOTE: This setup does not have real sockets for TEST_PLAYER_1_ID and TEST_PLAYER_2_ID.

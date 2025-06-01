@@ -5,6 +5,8 @@ import { Card } from '../interfaces/card.js';
 import { GameState, PlayerId } from '../interfaces/gameState.js';
 import { db } from '../db/database.js'; // Import the database instance
 import { DeckNotFoundError } from '../errors/customErrors.js';
+import cardService from './cardService.js';
+import { type DeckDetails, type DeckCardEntry, type DeckBasicInfo } from './apiService.js';
 
 export interface DeckList {
   deckId: string;
@@ -35,7 +37,7 @@ const DeckService = {
    * @param deckId The deck ID to retrieve
    * @returns Complete deck information including metadata
    */
-  async getDeckById(deckId: string): Promise<DeckInfo> {
+  async getDeckById(deckId: string): Promise<DeckDetails> {
     console.log(`[DeckService] Getting deck by ID: ${deckId}`);
     try {
       const deckQuery = db.prepare(`
@@ -49,8 +51,53 @@ const DeckService = {
         throw new DeckNotFoundError(`Deck with ID ${deckId} not found.`, deckId);
       }
 
-      console.log(`[DeckService] Found deck: ${deck.name} owned by ${deck.player_id}`);
-      return deck;
+      console.log(`[DeckService] Found deck basic info: ${deck.name} owned by ${deck.player_id}`);
+
+      // Fetch all card entries for the deck
+      const deckCardEntriesQuery = db.prepare('SELECT card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id');
+      const rawDeckCards = deckCardEntriesQuery.all(deckId) as { card_id: string; quantity: number; is_sideboard: number }[];
+
+      const populatedMainBoard: DeckCardEntry[] = [];
+      const populatedSideBoard: DeckCardEntry[] = [];
+      let totalDeckCards = 0;
+
+      for (const rawEntry of rawDeckCards) {
+        // Fetch full card details for each entry
+        // Note: cardService.getCardById might throw CardNotFoundError if a card ID is invalid
+        // This should be handled or ensured by data integrity.
+        const cardDetail = cardService.getCardById(rawEntry.card_id);
+        if (cardDetail) {
+          const deckCardEntry: DeckCardEntry = {
+            cardId: cardDetail.id,
+            card: cardDetail,
+            quantity: rawEntry.quantity
+          };
+          if (rawEntry.is_sideboard === 0) {
+            populatedMainBoard.push(deckCardEntry);
+            totalDeckCards += rawEntry.quantity;
+          } else {
+            populatedSideBoard.push(deckCardEntry);
+          }
+        } else {
+          // This case means a card_id in deck_cards does not exist in the cards table.
+          // This indicates a data integrity issue.
+          // Depending on desired behavior, could throw an error, log a warning, or skip.
+          console.warn(`[DeckService] Card with ID ${rawEntry.card_id} not found for deck ${deckId}. Skipping entry.`);
+        }
+      }
+
+      return {
+        id: deck.id,
+        name: deck.name,
+        description: deck.description || '',
+        mainBoard: populatedMainBoard,
+        sideBoard: populatedSideBoard,
+        totalCards: totalDeckCards,
+        player_id: deck.player_id, 
+        format: deck.format,       
+        created_at: deck.created_at,
+        updated_at: deck.updated_at 
+      };
     } catch (error) {
       console.error(`[DeckService] Error getting deck ${deckId}:`, error);
       if (error instanceof DeckNotFoundError) throw error;
@@ -123,7 +170,7 @@ const DeckService = {
    * @param updates Object containing fields to update
    * @param newCards Optional new card list to replace existing cards
    */
-  async updateDeck(deckId: string, updates: Partial<Pick<DeckInfo, 'name' | 'format' | 'description'>>, newCards?: { cardId: string; quantity: number }[]): Promise<void> {
+  async updateDeck(deckId: string, name: string | undefined, description: string | undefined, mainBoard: DeckCardEntry[], sideBoard: DeckCardEntry[]): Promise<DeckDetails> {
     console.log(`[DeckService] Updating deck: ${deckId}`);
     
     // First verify the deck exists
@@ -152,38 +199,90 @@ const DeckService = {
       // Update deck information
       const result = updateDeckStmt.run({
         id: deckId,
-        name: updates.name || null,
-        format: updates.format || null,
-        description: updates.description || null
+        name: name || null,
+        description: description || null
       });
 
       if (result.changes === 0) {
         throw new Error(`Failed to update deck ${deckId}`);
       }
 
-      // If new cards are provided, replace all existing cards
-      if (newCards) {
-        // Delete existing cards
-        deleteDeckCardsStmt.run(deckId);
-        
-        // Insert new cards
-        for (const card of newCards) {
-          if (card.quantity <= 0) continue;
-          insertDeckCardStmt.run({
-            deck_id: deckId,
-            card_id: card.cardId,
-            quantity: card.quantity,
-            is_sideboard: 0
-          });
-        }
-        console.log(`[DeckService] Updated deck ${deckId} with ${newCards.length} card entries`);
-      } else {
-        console.log(`[DeckService] Updated deck ${deckId} metadata only`);
+      // Always replace existing cards
+      deleteDeckCardsStmt.run(deckId);
+      
+      // Insert new mainBoard cards
+      for (const entry of mainBoard) {
+        if (entry.quantity <= 0) continue;
+        insertDeckCardStmt.run({
+          deck_id: deckId,
+          card_id: entry.cardId, // Assuming DeckCardEntry has cardId directly
+          quantity: entry.quantity,
+          is_sideboard: 0
+        });
       }
+
+      // Insert new sideBoard cards
+      for (const entry of sideBoard) {
+        if (entry.quantity <= 0) continue;
+        insertDeckCardStmt.run({
+          deck_id: deckId,
+          card_id: entry.cardId, // Assuming DeckCardEntry has cardId directly
+          quantity: entry.quantity,
+          is_sideboard: 1
+        });
+      }
+      const totalCardsProcessed = mainBoard.length + sideBoard.length;
+      console.log(`[DeckService] Updated deck ${deckId} with ${totalCardsProcessed} card entries across main and side boards.`);
     });
 
     try {
       transaction();
+
+      // Fetch the updated deck details to return
+      const deckInfoQuery = db.prepare('SELECT id, name, description, player_id, format, created_at, updated_at FROM decks WHERE id = ?');
+      const updatedDeckInfo = deckInfoQuery.get(deckId) as DeckInfo | undefined;
+
+      if (!updatedDeckInfo) {
+        // This should ideally not happen if the transaction succeeded and deck was verified
+        throw new DeckNotFoundError(`Deck with ID ${deckId} not found after update.`, deckId);
+      }
+
+      const deckCardEntriesQuery = db.prepare('SELECT card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ?');
+      const rawDeckCards = deckCardEntriesQuery.all(deckId) as { card_id: string; quantity: number; is_sideboard: number }[];
+
+      const populatedMainBoard: DeckCardEntry[] = [];
+      const populatedSideBoard: DeckCardEntry[] = [];
+      let totalDeckCards = 0;
+
+      for (const rawEntry of rawDeckCards) {
+        const cardDetail = cardService.getCardById(rawEntry.card_id);
+        if (cardDetail) {
+          const deckCardEntry: DeckCardEntry = {
+            cardId: cardDetail.id,
+            card: cardDetail,
+            quantity: rawEntry.quantity
+          };
+          if (rawEntry.is_sideboard === 0) {
+            populatedMainBoard.push(deckCardEntry);
+            totalDeckCards += rawEntry.quantity;
+          } else {
+            populatedSideBoard.push(deckCardEntry);
+          }
+        }
+      }
+
+      return {
+        id: updatedDeckInfo.id,
+        name: updatedDeckInfo.name,
+        description: updatedDeckInfo.description || '',
+        mainBoard: populatedMainBoard,
+        sideBoard: populatedSideBoard,
+        totalCards: totalDeckCards,
+        player_id: updatedDeckInfo.player_id, 
+        format: updatedDeckInfo.format,       
+        created_at: updatedDeckInfo.created_at,
+        updated_at: updatedDeckInfo.updated_at 
+      };
     } catch (error) {
       console.error(`[DeckService] Error updating deck ${deckId}:`, error);
       throw error;
@@ -233,11 +332,15 @@ const DeckService = {
    */
   async getDeckCards(deckId: string, includeSideboard: boolean = false): Promise<DeckCard[]> {
     console.log(`[DeckService] Getting cards for deck: ${deckId}, includeSideboard: ${includeSideboard}`);
-    
-    // First verify the deck exists
-    await this.getDeckById(deckId);
-    
-    try {
+  
+  // First verify the deck exists by a lightweight query to avoid recursion
+  const deckExistsQuery = db.prepare('SELECT id FROM decks WHERE id = ?');
+  const deckExistsResult = deckExistsQuery.get(deckId) as { id: string } | undefined;
+  if (!deckExistsResult) {
+    throw new DeckNotFoundError(`Deck with ID ${deckId} not found when attempting to get its cards.`, deckId);
+  }
+  
+  try {
       const query = includeSideboard
         ? 'SELECT deck_id, card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? ORDER BY is_sideboard, card_id'
         : 'SELECT deck_id, card_id, quantity, is_sideboard FROM deck_cards WHERE deck_id = ? AND is_sideboard = 0 ORDER BY card_id';

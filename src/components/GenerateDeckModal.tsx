@@ -12,9 +12,15 @@ interface DeckGenerationParams {
   format?: string;
 }
 
+interface GenerationResult {
+  success: boolean;
+  deckName?: string;
+  message?: string;
+}
+
 interface GenerateDeckModalProps {
   isVisible: boolean;
-  onGenerate: (params: DeckGenerationParams) => void;
+  onGenerate: (result: GenerationResult) => void;
   onClose: () => void;
   playerId: string;
 }
@@ -95,6 +101,11 @@ const GenerateDeckModal: React.FC<GenerateDeckModalProps> = ({
     return true;
   };
   
+  const isFormInvalid = 
+    selectedColors.length === 0 || 
+    !deckName.trim() || 
+    Math.abs(landRatio + creatureRatio + spellRatio - 1.0) > 0.01;
+
   const handleGenerate = async () => {
     setError(null);
     
@@ -129,17 +140,18 @@ const GenerateDeckModal: React.FC<GenerateDeckModalProps> = ({
       
       // Call the onGenerate callback
       onGenerate({
-        colors: selectedColors,
-        totalCards,
-        landRatio,
-        creatureRatio,
-        spellRatio,
-        deckName,
-        playerId
+        success: true,
+        deckName: deckName,
+        message: `Deck "${deckName}" generated successfully!`
       });
     } catch (err: any) {
       console.error('Error generating deck:', err);
       setError(err.message || 'Failed to generate deck');
+      onGenerate({
+        success: false,
+        deckName: deckName, // Pass deckName for context, though it might not have been created
+        message: err.message || 'Failed to generate deck.'
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -376,14 +388,14 @@ const GenerateDeckModal: React.FC<GenerateDeckModalProps> = ({
           {!generatedDeck && (
             <button
               onClick={handleGenerate}
-              disabled={isGenerating || selectedColors.length === 0 || !deckName.trim()}
+              disabled={isGenerating || isFormInvalid}
               style={{
                 padding: '10px 20px',
-                backgroundColor: isGenerating || selectedColors.length === 0 || !deckName.trim() ? '#cccccc' : '#28a745',
+                backgroundColor: isGenerating || isFormInvalid ? '#cccccc' : '#28a745',
                 color: 'white',
                 border: 'none',
                 borderRadius: '5px',
-                cursor: isGenerating || selectedColors.length === 0 || !deckName.trim() ? 'not-allowed' : 'pointer',
+                cursor: isGenerating || isFormInvalid ? 'not-allowed' : 'pointer',
                 fontSize: '16px'
               }}
             >

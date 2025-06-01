@@ -87,6 +87,12 @@ export async function initializeDatabase(): Promise<void> {
   db.exec(deckCardsTableSchema);
   console.log('Database schema initialized (or already exists).');
 
+  console.log('Creating indexes...');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_cards_name ON cards (name);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_cards_card_type ON cards (card_type);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_decks_player_id ON decks (player_id);');
+  console.log('Indexes created (or already exist).');
+
   // Enable foreign key support if not enabled by default (good practice for SQLite)
   db.pragma('foreign_keys = ON');
 

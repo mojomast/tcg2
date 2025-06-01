@@ -36,10 +36,17 @@ interface SelectedCardEntry {
  * Output structure for a generated deck.
  */
 export interface GeneratedDeck {
+  // Note: deckId was previously considered here but will be part of GeneratedDeckWithId
+  // id?: string; // Optional: ID of the saved deck
   mainBoard: DeckEntry[];
   sideBoard?: DeckEntry[]; // Optional, based on future enhancements
   deckName: string;
   // TODO: Add other relevant deck properties, e.g., format
+}
+
+export interface GeneratedDeckWithId {
+  generatedDeck: GeneratedDeck;
+  deckId: string;
 }
 
 /**
@@ -288,7 +295,7 @@ async function saveDeckToDatabase(generatedDeck: GeneratedDeck, playerId: string
   }
 }
 
-export async function generateDeck(config: DeckConfig): Promise<GeneratedDeck> {
+export async function generateDeck(config: DeckConfig): Promise<GeneratedDeckWithId> {
   console.log('Generating deck with config:', config);
 
   const allEligibleNonLandCards = await fetchEligibleCards(config);
@@ -328,18 +335,17 @@ export async function generateDeck(config: DeckConfig): Promise<GeneratedDeck> {
   // Save the deck to the database
   // For now, using a placeholder playerId. This should come from user context in a real app.
   const playerId = config.playerId || 'player1'; 
+  let savedDeckId: string;
   try {
-    const savedDeckId = await saveDeckToDatabase(finalGeneratedDeck, playerId);
+    savedDeckId = await saveDeckToDatabase(finalGeneratedDeck, playerId);
     console.log(`Deck saved with ID: ${savedDeckId}`);
-    // Optionally, add savedDeckId to the returned GeneratedDeck object if useful for the caller
-    // finalGeneratedDeck.id = savedDeckId; 
   } catch (error) {
     console.error('Failed to save the generated deck:', error);
-    // Decide how to handle save failure: return deck anyway, or throw?
-    // For now, we'll log and return the deck object without an ID.
+    // Re-throw the error to be handled by the caller (e.g., API endpoint)
+    throw error;
   }
 
-  return finalGeneratedDeck;
+  return { generatedDeck: finalGeneratedDeck, deckId: savedDeckId };
 }
 
 // TODO: Implement remaining helper functions:
