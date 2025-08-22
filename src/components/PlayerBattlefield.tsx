@@ -222,22 +222,10 @@ const PlayerBattlefield: React.FC = () => {
       }
     }
   };
+
   const isBlockStep = currentPhase === 'COMBAT' && currentStep === 'DECLARE_BLOCKERS';
   const canDeclareAttackers = isMyTurn && isAttackStep && priorityPlayerId === localPlayerId;
   const canDeclareBlockers = !isMyTurn && isBlockStep && priorityPlayerId === localPlayerId;
-
-  if (!localPlayer) {
-    return <div className="player-battlefield"><p>Loading battlefield...</p></div>;
-  }
-
-  const battlefieldCards: BattlefieldCardType[] = localPlayer.battlefield
-    .map(id => gameObjects[id])
-    .filter((card): card is BattlefieldCardType => !!card); // Ensure only valid cards are included and type guard
-
-  // Separate cards by type for better organization
-  const creatureCards = battlefieldCards.filter(card => card.type === 'Creature');
-  const resourceCards = battlefieldCards.filter(card => card.type === 'Resource');
-  const otherCards = battlefieldCards.filter(card => card.type !== 'Creature' && card.type !== 'Resource');
 
   // Handle attacker selection
   const handleAttackerSelect = useCallback((creatureId: string) => {
@@ -267,6 +255,19 @@ const PlayerBattlefield: React.FC = () => {
       }
     }
   }, [selectedBlockers, gameState.attackers]);
+
+  if (!localPlayer) {
+    return <div className="player-battlefield"><p>Loading battlefield...</p></div>;
+  }
+
+  const battlefieldCards: BattlefieldCardType[] = localPlayer.battlefield
+    .map(id => gameObjects[id])
+    .filter((card): card is BattlefieldCardType => !!card); // Ensure only valid cards are included and type guard
+
+  // Separate cards by type for better organization
+  const creatureCards = battlefieldCards.filter(card => card.type === 'Creature');
+  const resourceCards = battlefieldCards.filter(card => card.type === 'Resource');
+  const otherCards = battlefieldCards.filter(card => card.type !== 'Creature' && card.type !== 'Resource');
 
   // Check if a creature can attack
   const canCreatureAttack = (creature: BattlefieldCardType): boolean => {

@@ -6,7 +6,7 @@ import GameBoard from './components/GameBoard';
 import MainMenu from './components/MainMenu';
 import Deckbuilder from './components/Deckbuilder'; // Import the new Deckbuilder
 import socketService from './services/socketService';
-import { setGameStateFromServer } from './store/slices/gameSlice';
+import { setGameStateFromServer, updatePlayerManaPool } from './store/slices/gameSlice';
 import { GameState as ServerGameState, GameEvent, EventType } from './interfaces/gameState';
 import { updateManaPool } from './store/slices/playerSlice';
 import './index.css'; // Global styles
@@ -46,7 +46,9 @@ const App: React.FC = () => {
         break;
       case EventType.MANA_POOL_UPDATED:
         if (eventData.payload && typeof eventData.payload.playerId === 'string' && eventData.payload.manaPool) {
+          // Update both the simple player slice (if used elsewhere) and the main game slice's player mana
           store.dispatch(updateManaPool(eventData.payload as { playerId: string; manaPool: any }));
+          store.dispatch(updatePlayerManaPool({ playerId: eventData.payload.playerId, manaPool: eventData.payload.manaPool }));
         } else {
           console.warn('[App.tsx] MANA_POOL_UPDATED event with invalid payload:', eventData);
         }

@@ -1,8 +1,9 @@
-import React from 'react';
-import { useSelector } from 'react-redux';
-import { RootState } from '../store/store';
+import React, { useState } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState, AppDispatch } from '../store/store';
 import { PlayerState } from '../store/slices/gameSlice';
 import { ManaPool } from '../interfaces/gameState';
+import { playResourceViaSocket } from '../store/slices/gameSlice';
 
 import './ManaDisplay.css'; // We'll create this for styling
 
@@ -48,11 +49,58 @@ const ManaSymbolDisplay: React.FC<ManaSymbolDisplayProps> = ({ color, count }) =
 };
 
 const ManaDisplay: React.FC = () => {
-  const localPlayerId = useSelector((state: RootState) => state.game.localPlayerId);
-  const players = useSelector((state: RootState) => state.game.players);
-  const gameState = useSelector((state: RootState) => state.game);
+   const dispatch = useDispatch<AppDispatch>();
+   const localPlayerId = useSelector((state: RootState) => state.game.localPlayerId);
+   const players = useSelector((state: RootState) => state.game.players);
+   const gameState = useSelector((state: RootState) => state.game);
+   const [isDragOver, setIsDragOver] = useState(false);
 
-  const localPlayer: PlayerState | undefined = players.find(p => p.playerId === localPlayerId);
+   const localPlayer: PlayerState | undefined = players.find(p => p.playerId === localPlayerId);
+
+   // Check if current game state allows playing resources
+   const canPlayResource = localPlayer &&
+                          gameState.currentPhase === 'MAIN' &&
+                          (gameState.currentStep === 'MAIN_PRE' || gameState.currentStep === 'MAIN_POST') &&
+                          gameState.activePlayerId === localPlayerId &&
+                          gameState.priorityPlayerId === localPlayerId &&
+                          !localPlayer.hasPlayedResourceThisTurn;
+
+   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+     event.preventDefault();
+     event.stopPropagation();
+     if (canPlayResource) {
+       setIsDragOver(true);
+     }
+   };
+
+   const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+     event.preventDefault();
+     event.stopPropagation();
+     setIsDragOver(false);
+   };
+
+   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+     event.preventDefault();
+     event.stopPropagation();
+     setIsDragOver(false);
+
+     if (!canPlayResource) {
+       return;
+     }
+
+     try {
+       const cardId = event.dataTransfer.getData('text/plain');
+       if (cardId) {
+         // Check if the dropped card is a resource/land
+         const card = gameState.gameObjects[cardId];
+         if (card && (card.type === 'Resource' || card.type === 'Land')) {
+           dispatch(playResourceViaSocket({ cardId }));
+         }
+       }
+     } catch (error) {
+       console.error('Error processing drop:', error);
+     }
+   };
 
   if (!localPlayer) {
     return (
@@ -63,29 +111,66 @@ const ManaDisplay: React.FC = () => {
   }
 
   const manaPool = localPlayer.manaPool;
-  const totalMana = Object.values(manaPool).reduce((sum, amount) => sum + amount, 0);
+  const totalMana = Object.values(manaPool).reduce((sum, amount) => sum + (amount || 0), 0);
+
+  // Debug logging
+  console.log('[ManaDisplay] Current mana pool:', manaPool);
+  console.log('[ManaDisplay] Total mana calculated:', totalMana);
+  console.log('[ManaDisplay] Poison counters:', localPlayer.poisonCounters);
   
   // Check if mana pools should be visible (they empty at end of most steps)
   const currentPhase = gameState.currentPhase;
   const showManaWarning = currentPhase === 'END' && totalMana > 0;
   
   return (
-    <div className="mana-display-container" style={{ margin: '10px 0' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
+    <div
+      className="mana-display-container"
+      style={{
+        margin: '10px 0',
+        border: isDragOver ? '2px dashed #4CAF50' : canPlayResource ? '2px dashed #ccc' : '2px solid transparent',
+        borderRadius: '8px',
+        padding: '8px',
+        backgroundColor: isDragOver ? 'rgba(76, 175, 80, 0.1)' : 'transparent',
+        transition: 'all 0.2s ease',
+        minHeight: '80px',
+        position: 'relative'
+      }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '8px'
       }}>
-        <h4 style={{ margin: 0, fontSize: '1em', color: '#333' }}>
-          ⚡ Mana Pool
-        </h4>
-        <div style={{ 
-          fontSize: '0.8em', 
-          color: totalMana > 0 ? '#0066cc' : '#999',
-          fontWeight: 'bold'
+        <h4 style={{
+          margin: 0,
+          fontSize: '1em',
+          color: isDragOver ? '#4CAF50' : canPlayResource ? '#333' : '#999'
         }}>
-          Total: {totalMana}
+          ⚡ Mana Pool {canPlayResource && !isDragOver && '(Drop resources here)'}
+          {isDragOver && '(Drop to play)'}
+        </h4>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+          <div style={{
+            fontSize: '0.8em',
+            color: totalMana > 0 ? '#0066cc' : '#999',
+            fontWeight: 'bold'
+          }}>
+            Total Mana: {totalMana}
+          </div>
+          {localPlayer.poisonCounters > 0 && (
+            <div style={{
+              fontSize: '0.7em',
+              color: '#9932cc',
+              fontWeight: 'bold',
+              fontStyle: 'italic'
+            }}>
+              🐍 Poison: {localPlayer.poisonCounters}
+            </div>
+          )}
         </div>
       </div>
       

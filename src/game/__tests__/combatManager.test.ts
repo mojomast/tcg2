@@ -131,7 +131,7 @@ describe('CombatManager', () => {
             // For now, assuming StateManager doesn't call complex engine methods in this context
         } as any;
 
-        stateManagerMock = new StateManager(gameEngineMock, gameState, mockGetCardFromInstanceIdFn); // Assuming StateManager constructor
+        stateManagerMock = new StateManager(gameEngineMock, gameState, mockGetCardFromInstanceIdFn); // Updated to use cardId string
 
         combatManager = new CombatManager(
             gameState,

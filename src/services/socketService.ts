@@ -160,8 +160,13 @@ class SocketService {
         //     console.warn(`[${this.serviceInstanceId}]: PLAYER_ID_ASSIGNED event missing playerId payload:`, eventData.payload);
         //   }
         //   break;
-        default:
-          console.warn(`[${this.serviceInstanceId}]: Received 'game_event' with unhandled type '${eventData.type}':`, eventData.payload);
+        default: // Handle other game events that might carry the full game state
+          if (eventData.payload?.gameState) {
+            console.log(`[${this.serviceInstanceId}]: Dispatching setGameStateFromServer for event type '${eventData.type}'.`);
+            store.dispatch(setGameStateFromServer(eventData.payload.gameState as GameState));
+          } else {
+            console.warn(`[${this.serviceInstanceId}]: Received 'game_event' with unhandled type '${eventData.type}' and no gameState payload:`, eventData.payload);
+          }
       }
     });
 

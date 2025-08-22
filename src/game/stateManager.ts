@@ -7,13 +7,13 @@ import { GameEngine } from './gameEngine.js'; // Import GameEngine
  */
 export class StateManager {
     private gameState: GameState;
-    private getCardFromInstanceIdFn: (instanceId: GameObjectId) => Card | undefined;
+    private getBaseCardDataFn: (cardId: string) => Card | undefined;
     private engine: GameEngine; // Add reference to GameEngine
 
-    constructor(engine: GameEngine, gameState: GameState, getCardFn: (instanceId: GameObjectId) => Card | undefined) {
+    constructor(engine: GameEngine, gameState: GameState, getCardFn: (cardId: string) => Card | undefined) {
         this.engine = engine; // Store GameEngine instance
         this.gameState = gameState;
-        this.getCardFromInstanceIdFn = getCardFn;
+        this.getBaseCardDataFn = getCardFn;
     }
 
     /**
@@ -50,9 +50,9 @@ export class StateManager {
                 const objectsToMove: { objectId: GameObjectId, destination: 'graveyard' }[] = []; // Prepare for moving
                 
                 player.battlefield.creatures.forEach(creature => {
-                    const cardData = this.getCardFromInstanceIdFn(creature.instanceId);
+                    const cardData = this.getBaseCardDataFn(creature.cardId);
                     // TODO: Calculate current health considering buffs/debuffs
-                    const currentHealth = cardData?.health ?? 0; 
+                    const currentHealth = cardData?.health ?? 0;
                     let isLethal = false;
 
                     // Check for 0 or less health
@@ -209,7 +209,7 @@ export class StateManager {
             return false;
         } else if (toZone === 'battlefield') {
             // Find the base card definition using the ID from the GameObject
-            const baseCard = this.getCardFromInstanceIdFn(cardObject.cardId);
+            const baseCard = this.getBaseCardDataFn(cardObject.cardId);
             if (!baseCard) {
                 console.error(`StateManager Error: Cannot find base card data for ${cardObject.cardId} to create battlefield object.`);
                 // TODO: Rollback removal?

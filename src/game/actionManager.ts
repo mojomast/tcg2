@@ -123,26 +123,14 @@ export class ActionManager {
             console.log(`ActionManager: Card ${cardObjectId} (${baseCard.name}) has no mana cost or is free.`);
             // Proceed if no cost (e.g., land or free spell)
         } else {
-            // Check if affordable
-            if (!this.engine.resourceManager.canAffordCost(playerId, cardCost)) {
+            // Check if affordable using proper generic handling
+            if (!this.engine.resourceManager.canPayCost(playerId, cardCost)) {
                 throw new Error(`ActionManager: Player ${playerId} cannot afford card ${cardObjectId} (${baseCard.name}). Cost: ${JSON.stringify(cardCost)}, Pool: ${JSON.stringify(playerState.manaPool)}`);
             }
 
-            // Spend the mana
-            let allManaPaidSuccessfully = true;
-            for (const [color, amount] of Object.entries(cardCost)) {
-                if (amount && amount > 0) { // Ensure amount is defined and positive
-                    const paid = this.engine.resourceManager.spendMana(playerId, color as ManaColor, amount);
-                    if (!paid) {
-                        allManaPaidSuccessfully = false;
-                        // Optional: Log which specific mana payment failed before throwing the more general error
-                        console.error(`ActionManager Error: Failed to spend ${amount} of ${color} mana for card ${cardObjectId} (${baseCard.name}).`);
-                        break; 
-                    }
-                }
-            }
-
-            if (!allManaPaidSuccessfully) {
+            // Spend the mana using ResourceManager.payCost to handle generic correctly
+            const paid = this.engine.resourceManager.payCost(playerId, cardCost);
+            if (!paid) {
                 throw new Error(`ActionManager Error: Failed to spend mana for ${cardObjectId} (${baseCard.name}) despite affordability check. This indicates an issue with ResourceManager.`);
             }
             console.log(`ActionManager: Player ${playerId} paid cost for ${baseCard.name}.`);
@@ -174,7 +162,7 @@ export class ActionManager {
 
         // Create stack item
         const stackItem: StackItem = {
-            stackId: this.engine.generateGameObjectId('stack_item'), // Ensure engine has this method
+            stackId: this.engine.generateGameObjectId('stack'), // Use readable ID format
             type: 'Spell', // All cards played from hand are initially 'Spell' on the stack.
                            // Resolution logic will determine if it's a permanent entering or an effect resolving.
             sourceCardId: baseCard.id, // ID of the base card definition

@@ -1,4 +1,4 @@
-import { GameState, PlayerId, GamePhase, GameStep, BattlefieldCard, EventType } from '../interfaces/gameState';
+import { GameState, PlayerId, GamePhase, GameStep, BattlefieldCard, EventType } from '../interfaces/gameState.js';
 import { GameEngine } from './gameEngine'; // For engine reference
 import { ResourceManager } from './resourceManager';
 import { CombatManager } from './combatManager';
@@ -48,9 +48,12 @@ export class TurnManager {
     public grantPriority(playerId: PlayerId): void {
         console.log(`TurnManager: Granting priority to player ${playerId}.`);
         this.gameState.priorityPlayerId = playerId;
+        this.engine.emitGameEvent(EventType.PRIORITY_CHANGED, { 
+            newPriorityPlayerId: playerId, 
+            activePlayerId: this.gameState.activePlayerId 
+        });
         // Consecutive passes are reset by calling resetConsecutivePasses() explicitly 
         // after a game state change (stack resolution, step/phase advance).
-        // TODO: Emit event for priority change
     }
 
     // Resets the consecutive pass counter.
@@ -116,6 +119,11 @@ export class TurnManager {
             // Advance to the next step in the current phase
             this.gameState.currentStep = currentPhaseSteps[currentStepIndex + 1];
             console.log(`Advanced to step: ${this.gameState.currentPhase} - ${this.gameState.currentStep}`);
+            this.engine.emitGameEvent(EventType.STEP_CHANGED, { 
+                newStep: this.gameState.currentStep, 
+                currentPhase: this.gameState.currentPhase,
+                activePlayerId: this.gameState.activePlayerId 
+            });
         } else {
             // End of current phase, advance to the next phase
             this.advancePhase();
@@ -163,6 +171,11 @@ export class TurnManager {
             this.gameState.currentStep = newPhaseSteps[0];
 
             console.log(`Advanced to Phase: ${this.gameState.currentPhase}, Step: ${this.gameState.currentStep}`);
+            this.engine.emitGameEvent(EventType.TURN_PHASE_CHANGED, { 
+                newPhase: this.gameState.currentPhase, 
+                newStep: this.gameState.currentStep,
+                activePlayerId: this.gameState.activePlayerId 
+            });
             
             // If moving to Combat phase, mana pools don't empty until end of Combat phase.
             // If moving to other phases, mana pools typically empty at end of previous step/phase.
@@ -197,6 +210,12 @@ export class TurnManager {
             activePlayerState.landPlayedThisTurn = false; // Also reset this if distinct
         }
         console.log(`Starting Turn ${this.gameState.turnNumber}. Active Player: ${this.gameState.activePlayerId}. Phase: ${this.gameState.currentPhase}, Step: ${this.gameState.currentStep}`);
+        this.engine.emitGameEvent(EventType.TURN_PASSED, { // Already existed, but ensure it's here
+            newTurnNumber: this.gameState.turnNumber,
+            newActivePlayerId: this.gameState.activePlayerId,
+            newPhase: this.gameState.currentPhase,
+            newStep: this.gameState.currentStep
+        });
     }
 
     private performStepEntryActions(step: GameStep, phase: GamePhase): void {
@@ -226,11 +245,21 @@ export class TurnManager {
                 console.log("UPKEEP step: Handling upkeep triggers (placeholder). Active player will get priority.");
                 // TODO: Handle upkeep triggers. They go on stack. Then AP gets priority.
                 this.stateManager.checkStateBasedActions();
+
+                // Auto-advance if no upkeep triggers (for now, always auto-advance)
+                // In a full implementation, we would check if there are upkeep triggers on the stack
+                console.log("UPKEEP step: No upkeep triggers, auto-advancing to DRAW step.");
+                this.advanceStep();
                 break;
             case 'DRAW':
                 this.drawStepAction(activePlayerId);
                 this.stateManager.checkStateBasedActions(); // Check SBAs (e.g. drawing from empty library)
                 // TODO: Handle triggered abilities from drawing. They go on stack. Then AP gets priority.
+
+                // Auto-advance to MAIN phase after drawing (if no draw triggers)
+                // In a full implementation, we would check if there are draw triggers on the stack
+                console.log("DRAW step: Auto-advancing to MAIN phase after drawing.");
+                this.advanceStep();
                 break;
             case 'MAIN_PRE':
             case 'MAIN_POST':
@@ -359,6 +388,71 @@ export class TurnManager {
         // TODO: Handle triggered abilities that trigger here.
     }
 
+    public passTurn(playerId: PlayerId): boolean {
+        if (this.gameState.activePlayerId !== playerId) {
+            console.warn(`TurnManager: Player ${playerId} tried to pass turn, but it's not their turn.`);
+            return false;
+        }
+
+        console.log(`TurnManager: Player ${playerId} is initiating a full turn pass, advancing to next player's main phase.`);
+
+        // 1. Advance to the next player's turn, setting them to UNTAP step.
+        this.nextTurn(); 
+
+        // 2. Automatically advance through UNTAP, UPKEEP, DRAW to MAIN_PRE.
+        // performStepEntryActions for UNTAP calls advanceStep() to move to UPKEEP.
+        if (this.gameState.currentStep === 'UNTAP') {
+            console.log('TurnManager.passTurn: Processing UNTAP step actions.');
+            this.performStepEntryActions('UNTAP', 'BEGIN'); 
+        }
+        
+        // After UNTAP's advanceStep, we should be in UPKEEP.
+        // Perform UPKEEP actions, then manually advanceStep() to DRAW.
+        if (this.gameState.currentStep === 'UPKEEP') {
+            console.log('TurnManager.passTurn: Processing UPKEEP step actions and advancing to DRAW.');
+            this.performStepEntryActions('UPKEEP', 'BEGIN');
+            // Check for SBAs and triggers from upkeep before advancing
+            const gameEndedAfterUpkeepSBA = this.stateManager.checkStateBasedActions();
+            if (gameEndedAfterUpkeepSBA) return false; 
+            // TODO: Handle upkeep triggers if any occurred before manually advancing step
+            this.advanceStep(); 
+        }
+
+        // After UPKEEP's advanceStep, we should be in DRAW.
+        // Perform DRAW actions, then manually advanceStep() to MAIN_PRE.
+        if (this.gameState.currentStep === 'DRAW') {
+            console.log('TurnManager.passTurn: Processing DRAW step actions and advancing to MAIN_PRE.');
+            this.performStepEntryActions('DRAW', 'BEGIN');
+            // Check for SBAs and triggers from draw before advancing
+            const gameEndedAfterDrawSBA = this.stateManager.checkStateBasedActions();
+            if (gameEndedAfterDrawSBA) return false;
+            // TODO: Handle draw triggers if any occurred before manually advancing step
+            this.advanceStep(); 
+        }
+
+        // 3. Grant priority if we correctly landed in MAIN_PRE.
+        //    The advanceStep from DRAW should land us in MAIN_PRE (first step of 'MAIN' phase).
+        if (this.gameState.currentPhase === 'MAIN' && this.gameState.currentStep === 'MAIN_PRE') {
+            console.log(`TurnManager.passTurn: Successfully reached ${this.gameState.currentPhase} - ${this.gameState.currentStep}. Granting priority to ${this.gameState.activePlayerId}.`);
+            this.grantPriority(this.gameState.activePlayerId);
+            this.resetConsecutivePasses();
+        } else {
+            console.error(`TurnManager.passTurn: Failed to reach MAIN_PRE. Current state: ${this.gameState.currentPhase} - ${this.gameState.currentStep}. Attempting to grant priority anyway if valid.`);
+            // Attempt to grant priority if it's a valid step, as a fallback.
+            if (this.gameState.currentStep !== 'UNTAP' && !(this.gameState.currentStep === 'CLEANUP' && !this.stateManager.cleanupRequiresPriority())) {
+                this.grantPriority(this.gameState.activePlayerId);
+                this.resetConsecutivePasses();
+            } else {
+                console.error(`TurnManager.passTurn: Cannot grant priority in ${this.gameState.currentStep}.`);
+                return false; // Indicate an issue
+            }
+        }
+        
+        console.log(`TurnManager: Turn passed. New state: ${this.gameState.activePlayerId}'s turn, ${this.gameState.currentPhase} - ${this.gameState.currentStep}, Priority: ${this.gameState.priorityPlayerId}`);
+        this.engine.emitGameEvent(EventType.GAME_STATE_UPDATE, { message: 'Full turn passed, state advanced.' }); // Emit a generic update
+        return true;
+    }
+
     public passPriority(playerId: PlayerId): void {
         if (this.gameState.priorityPlayerId !== playerId) {
             console.warn(`Player ${playerId} tried to pass priority but does not have it.`);
@@ -405,49 +499,5 @@ export class TurnManager {
         }
     }
 
-    /**
-     * Allows the active player to explicitly pass their turn.
-     * This is different from passing priority. Passing the turn moves directly to the next player's turn.
-     * This is generally used when a player has no more actions in their main phase and the stack is empty.
-     * @param playerId The ID of the player attempting to pass the turn.
-     * @returns true if the turn was successfully passed, false otherwise.
-     */
-    public passTurn(playerId: PlayerId): boolean {
-        console.log(`TurnManager: Player ${playerId} attempting to pass turn.`);
-
-        // 1. Validate it's the player's turn
-        if (this.gameState.activePlayerId !== playerId) {
-            console.warn(`TurnManager: Player ${playerId} cannot pass turn, it is not their turn.`);
-            return false;
-        }
-        
-        // Optional: Add more conditions if needed, e.g., player must have priority, stack must be empty.
-        // For now, we allow passing the turn if it's the active player's turn.
-        // Example:
-        // if (this.gameState.priorityPlayerId !== playerId) {
-        //     console.warn(`TurnManager: Player ${playerId} cannot pass turn, they do not have priority.`);
-        //     return false;
-        // }
-        // if (this.gameState.stack.length > 0) {
-        //     console.warn(`TurnManager: Player ${playerId} cannot pass turn, the stack is not empty.`);
-        //     return false;
-        // }
-
-        console.log(`TurnManager: Player ${playerId} is passing the turn.`);
-        
-        // 2. Proceed to the next turn using the existing nextTurn logic.
-        // nextTurn handles phase transitions, active player switching, etc.
-        this.nextTurn(); 
-
-        // Emit a game event for turn passed
-        // Ensure EventType.TURN_PASSED is defined in your interfaces/gameState.ts
-        this.engine.emitGameEvent(EventType.TURN_PASSED, {
-            previousPlayerId: playerId,
-            newActivePlayerId: this.gameState.activePlayerId,
-            newTurnNumber: this.gameState.turnNumber
-            // Consider adding gameState: this.gameState if clients need the full state update immediately from this event
-        });
-
-        return true;
-    }
+    // Duplicate passTurn method removed - using the more comprehensive implementation above
 }

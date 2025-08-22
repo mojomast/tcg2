@@ -18,10 +18,13 @@ import ManaDisplay from './ManaDisplay'; // Import ManaDisplay
 import GameOverModal from './GameOverModal'; // Import GameOverModal
 import { RootState } from '../store/store.js';
 import { setLocalPlayerId, setGameStateFromServer } from '../store/slices/gameSlice.js';
+import { setPlayerInfo } from '../store/slices/playerSlice.js'; // Import setPlayerInfo
 import { EventType, GameEvent, GameState as ServerGameState } from '../interfaces/gameState.js';
 import socketService from '../services/socketService.js';
 import { TEST_GAME_ID, TEST_PLAYER_1_ID, TEST_PLAYER_2_ID } from '../config/constants.js';
 import DeckSelectionModal from './DeckSelectionModal.js';
+import GameModeSelector from './GameModeSelector.js';
+import SinglePlayerControls from './SinglePlayerControls.js';
 import apiService from '../services/apiService.js';
 
 // Define DeckInfo interface for the component
@@ -43,6 +46,9 @@ const GameBoard: React.FC = () => {
   const [availableDecks, setAvailableDecks] = useState<DeckInfo[]>([]);
   const [loadingDecks, setLoadingDecks] = useState(false);
   const [deckError, setDeckError] = useState<string | null>(null);
+  const [gameMode, setGameMode] = useState<'multiplayer' | 'singleplayer' | 'demo' | null>(null);
+  const [showGameModeSelector, setShowGameModeSelector] = useState(true);
+  const [isSinglePlayerMode, setIsSinglePlayerMode] = useState(false);
 
   // useEffect to log when localPlayerId changes, useful for debugging UI state
   useEffect(() => {
@@ -88,7 +94,8 @@ const GameBoard: React.FC = () => {
     setShowDeckSelection(false);
     
     // Now join the game with the selected deck
-    dispatch(setLocalPlayerId(selectedPlayerId));
+    dispatch(setLocalPlayerId(selectedPlayerId)); // From gameSlice
+    dispatch(setPlayerInfo({ id: selectedPlayerId, name: `Player ${selectedPlayerId.endsWith(TEST_PLAYER_1_ID) ? '1' : '2'}` })); // From playerSlice
     socketService.emitJoinGame(TEST_GAME_ID, selectedPlayerId);
     console.log(`Attempting to join game ${TEST_GAME_ID} as ${selectedPlayerId} with deck ${deckId}`);
   };
@@ -96,6 +103,30 @@ const GameBoard: React.FC = () => {
   const handleDeckSelectionCancel = () => {
     setShowDeckSelection(false);
   };
+
+  const handleGameModeSelect = (mode: 'multiplayer' | 'singleplayer' | 'demo') => {
+    setGameMode(mode);
+    setShowGameModeSelector(false);
+
+    if (mode === 'singleplayer') {
+      setIsSinglePlayerMode(true);
+    } else if (mode === 'demo') {
+      // Handle demo mode - for now, just start multiplayer
+      setGameMode('multiplayer');
+    }
+  };
+
+  const handleExitSinglePlayer = () => {
+    setIsSinglePlayerMode(false);
+    setGameMode(null);
+    setShowGameModeSelector(true);
+    setSelectedPlayerId(TEST_PLAYER_1_ID);
+  };
+
+  // Show game mode selector if no mode is selected
+  if (showGameModeSelector) {
+    return <GameModeSelector onSelectMode={handleGameModeSelect} />;
+  }
 
   if (!localPlayerId) {
     return (
@@ -209,6 +240,13 @@ const GameBoard: React.FC = () => {
         <PlayerInfoBar />
         {/* PhaseDisplay might be better here or within ActionControls based on final design preference */}
         <PhaseDisplay /> 
+      </div>
+      <div className="action-controls-area"> {/* New area for controls */}
+        <ActionControls />
+      </div>
+
+      {/* Mana Display - could be part of PlayerInfoBar or separate */}
+      <div className="player-info-bar-area">
         <ManaDisplay /> {/* Add ManaDisplay here */}
       </div>
 
@@ -217,7 +255,7 @@ const GameBoard: React.FC = () => {
       </div>
       
       {/* Game Over Modal */}
-      <GameOverModal 
+      <GameOverModal
         isVisible={gameState.gameEnded || false}
         onPlayAgain={() => {
           console.log('Play Again clicked - implement game restart logic');
@@ -228,6 +266,11 @@ const GameBoard: React.FC = () => {
           // TODO: Implement return to menu functionality
         }}
       />
+
+      {/* Single Player Controls */}
+      {isSinglePlayerMode && (
+        <SinglePlayerControls onExitSinglePlayer={handleExitSinglePlayer} />
+      )}
     </div>
   );
 };

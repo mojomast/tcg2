@@ -217,6 +217,13 @@ const gameSlice = createSlice({
       console.log('[gameSlice] setGameStateFromServer: Final new state players:', JSON.parse(JSON.stringify(state.players.map(p => ({ id: p.playerId, name: p.name, hand: p.hand, handSize: p.handSize, deckSize: p.deckSize })))));
       console.log('[gameSlice] setGameStateFromServer: Final new state localPlayerId:', state.localPlayerId);
     },
+    updatePlayerManaPool: (state, action: PayloadAction<{ playerId: ServerPlayerId; manaPool: ManaPool }>) => {
+      const { playerId, manaPool } = action.payload;
+      const player = state.players.find(p => p.playerId === playerId);
+      if (player) {
+        player.manaPool = { ...manaPool };
+      }
+    },
     setLocalPlayerId: (state, action: PayloadAction<string>) => {
       console.log('[gameSlice] setLocalPlayerId:', action.payload);
       state.localPlayerId = action.payload;
@@ -243,7 +250,8 @@ const gameSlice = createSlice({
 
 export const {
   setGameStateFromServer,
-  setPlayerLife, 
+  updatePlayerManaPool,
+  setPlayerLife,
   setCurrentPhase,
   setLocalPlayerId,
 } = gameSlice.actions;
@@ -269,4 +277,12 @@ export const tapCardViaSocket = (payload: { cardId: string }): AppThunk => async
     return;
   }
   socketService.emit('tap_card', { playerId, cardInstanceId: payload.cardId });
+};
+
+export const passTurnViaSocket = (payload: { playerId: string }): AppThunk => async dispatch => {
+  socketService.emit('pass_turn', payload);
+};
+
+export const passPriorityViaSocket = (payload: { playerId: string }): AppThunk => async dispatch => {
+  socketService.emit('pass_priority', payload);
 };

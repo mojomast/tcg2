@@ -34,25 +34,19 @@ const manaSymbolToEmoji: { [key: string]: string } = {
 const formatManaCost = (cost: ManaCost): string => {
   if (!cost || Object.keys(cost).length === 0) return '0';
 
-  let costString = '';
-  if (cost.C && cost.C > 0) { // Ensure C is a positive number
-    costString += `${cost.C}`;
-  }
+  const parts: string[] = [];
+  // Show generic number first if present
+  if (typeof cost.C === 'number' && cost.C > 0) parts.push(String(cost.C));
 
   const colorOrder: (keyof ManaCost)[] = ['W', 'U', 'B', 'R', 'G'];
-  
   for (const color of colorOrder) {
-    const colorValue = cost[color];
-    if (colorValue && colorValue > 0) { // Ensure colorValue is a positive number
-      const emoji = manaSymbolToEmoji[color as string];
-      if (emoji) {
-        costString += emoji.repeat(colorValue as number);
-      } else {
-        costString += (color as string).repeat(colorValue as number);
-      }
+    const n = cost[color];
+    if (typeof n === 'number' && n > 0) {
+      const emoji = manaSymbolToEmoji[color as string] ?? color;
+      parts.push(emoji.repeat(n));
     }
   }
-  return costString || '0';
+  return parts.length ? parts.join('') : '0';
 };
 
 // Helper function to determine background color class based on color identity
@@ -152,14 +146,65 @@ const CardComponent: React.FC<CardProps> = ({ card, isAnimatingOut, cardLocation
     // event.dataTransfer.effectAllowed = 'move'; // Inform the browser about the type of operation
   };
 
+  // Determine if card can be tapped (lands, creatures, artifacts, etc.)
+  const canBeTapped = cardLocation === 'battlefield' && isOwner &&
+                     (card.type === 'Land' || card.type === 'Creature' || card.type === 'Artifact' || card.type === 'Planeswalker');
+
+  const handleTapClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+
+    if (!canBeTapped) return;
+
+    // Use existing tap functionality from context menu
+    dispatch(tapCardViaSocket({ cardId: card.instanceId }));
+  };
+
   return (
     <>
-    <div 
+    <div
       className={cardClassName}
       draggable={cardLocation === 'hand' && isOwner} // Only draggable if in hand and owned
       onDragStart={handleDragStart}
       onContextMenu={handleContextMenu}
     >
+      {/* Tap Button - Only show for tappable cards on battlefield */}
+      {canBeTapped && (
+        <button
+          className="card-tap-button"
+          onClick={handleTapClick}
+          title={card.tapped ? 'Untap Card' : 'Tap Card'}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            width: '24px',
+            height: '24px',
+            borderRadius: '50%',
+            border: card.tapped ? '2px solid #4CAF50' : '2px solid #ff9800',
+            backgroundColor: card.tapped ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 152, 0, 0.2)',
+            color: card.tapped ? '#4CAF50' : '#ff9800',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.1)';
+            e.currentTarget.style.backgroundColor = card.tapped ? 'rgba(76, 175, 80, 0.3)' : 'rgba(255, 152, 0, 0.3)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.backgroundColor = card.tapped ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 152, 0, 0.2)';
+          }}
+        >
+          {card.tapped ? '↻' : '⭕'}
+        </button>
+      )}
       <div className="card-header">
         <span className="card-name">{card.name}</span>
         {/* Attachment Indicator */}

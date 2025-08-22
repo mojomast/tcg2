@@ -85,16 +85,33 @@ const PlayerHandZone: React.FC = () => {
 
   const localPlayer: PlayerState | undefined = players.find(p => p.playerId === localPlayerId);
 
+  console.log('[PlayerHandZone Props/State Check]:');
+  console.log(`  localPlayerId: ${localPlayerId}`);
+  console.log(`  activePlayerId (from game state): ${activePlayerId}`);
+  console.log(`  priorityPlayerId (from game state): ${priorityPlayerId}`);
+  console.log(`  currentPhase (from game state): ${currentPhase}`);
+  console.log(`  isMyTurn: ${isMyTurn}`);
+  console.log(`  isMainPhase: ${isMainPhase}`);
+  console.log(`  canPlayCards (general condition): ${canPlayCards}`);
+  console.log(`  localPlayer?.hasPlayedResourceThisTurn: ${localPlayer?.hasPlayedResourceThisTurn}`);
+
   const handlePlayCardClick = (cardInstanceId: string) => {
     console.log(`Play Card clicked: ${cardInstanceId}, Player with priority: ${priorityPlayerId}`);
     if (localPlayerId && localPlayerId === priorityPlayerId) {
+      const card = gameObjects[cardInstanceId];
+      if (!canPlayNonResource(card)) {
+        console.warn(`[PlayerHandZone] Cannot play card ${card?.name || cardInstanceId}: not affordable or not playable in current state.`);
+        return;
+      }
       console.log(`Attempting to play card: ${cardInstanceId} by player ${localPlayerId}`);
       setAnimatingOutCardId(cardInstanceId);
-      socketService.emit('play_card', { 
+      const payload = { 
         playerId: localPlayerId, 
         cardInstanceId: cardInstanceId,
         // targetId: null, // Add target selection later if needed
-      });
+      };
+      console.log(`[PlayerHandZone] Emitting 'play_card' for NON-RESOURCE with payload:`, JSON.parse(JSON.stringify(payload)));
+      socketService.emit('play_card', payload);
       setTimeout(() => setAnimatingOutCardId(null), 500); // Animation duration: 500ms
     } else {
       console.warn(`Cannot play card: Priority is with ${priorityPlayerId}, local player is ${localPlayerId}`);
@@ -129,12 +146,13 @@ const PlayerHandZone: React.FC = () => {
       console.warn('Cannot play resource: No player ID');
       return;
     }
-    
+
     console.log(`Playing resource card: ${cardInstanceId}`);
-    socketService.emit('play_card', {
-      playerId: localPlayerId,
-      cardInstanceId: cardInstanceId
-    });
+    const payload = {
+      cardId: cardInstanceId // Use 'cardId' to match the expected payload format
+    };
+    console.log(`[PlayerHandZone] Emitting 'play_resource' for RESOURCE with payload:`, JSON.parse(JSON.stringify(payload)));
+    socketService.emit('play_resource', payload);
   };
   
   // Helper functions for card playability

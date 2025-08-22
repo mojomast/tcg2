@@ -211,10 +211,13 @@ export class ResourceManager {
      * @param permanentId The ID of the permanent to tap.
      */
     tapForMana(playerId: PlayerId, permanentId: string): void {
+        console.log(`ResourceManager: === TAPPING FOR MANA === Player ${playerId} tapping ${permanentId}`);
+
         const battlefieldCard = this.dependencies.findBattlefieldCardFn(permanentId); // Get the instance on the battlefield
 
         if (!battlefieldCard || battlefieldCard.controllerId !== playerId) {
             console.error(`ResourceManager Error: Cannot tap ${permanentId} for player ${playerId}. Not found or not controlled.`);
+            console.error(`BattlefieldCard found:`, battlefieldCard);
             return;
         }
 
@@ -230,6 +233,8 @@ export class ResourceManager {
             return;
         }
 
+        console.log(`ResourceManager: Found base card ${baseCard.name} with producesMana:`, baseCard.producesMana);
+
         // Check if the card produces mana
         if (!baseCard.producesMana) {
             console.warn(`ResourceManager: Card ${baseCard.name} (${permanentId}) does not have a 'producesMana' property defined. Cannot tap for mana.`);
@@ -244,21 +249,25 @@ export class ResourceManager {
         // Add the specified mana to the pool
         let manaAdded = false;
         const manaToProduce = baseCard.producesMana;
+        console.log(`ResourceManager: Mana to produce:`, manaToProduce);
+
         for (const color in manaToProduce) {
             // Ensure the key is a valid ManaColor or 'C'
             if (Object.prototype.hasOwnProperty.call(manaToProduce, color)) {
                 const amount = manaToProduce[color as keyof ManaCost];
                 if (amount && amount > 0) {
+                    console.log(`ResourceManager: Adding ${amount} ${color} mana to player ${playerId}`);
                     // Type assertion needed because color could be 'C' which isn't ManaColor
                     this.addMana(playerId, color as ManaColor, amount);
                     manaAdded = true;
-                    // Log specific mana added inside addMana
                 }
             }
         }
 
         if (!manaAdded) {
             console.warn(`ResourceManager: Tapped ${permanentId} (${baseCard.name}), but it produced no mana according to its producesMana property.`);
+        } else {
+            console.log(`ResourceManager: Successfully generated mana from ${baseCard.name}`);
         }
     }
 
@@ -318,12 +327,43 @@ export class ResourceManager {
             throw new Error(`ResourceManager: Card ${cardInstanceId} is not on the battlefield (currently in ${card.currentZone}).`);
         }
         
-        // Toggle the tapped state
+        // Toggle the tapped state; if becoming tapped and the card produces mana, add mana to pool
         const wasTapped = card.tapped;
         card.tapped = !card.tapped;
-        
+
         console.log(`ResourceManager: Toggled ${card.name} (${cardInstanceId}) from ${wasTapped ? 'tapped' : 'untapped'} to ${card.tapped ? 'tapped' : 'untapped'}`);
-        
+
+        // If the card just became tapped and has producesMana, generate mana
+        if (!wasTapped && card.tapped) {
+            const baseCard = this.dependencies.getBaseCardDataFn(card.cardId);
+            if (baseCard) {
+                if (baseCard.producesMana) {
+                    for (const color in baseCard.producesMana) {
+                        const amount = baseCard.producesMana[color as keyof ManaCost] || 0;
+                        if (amount > 0) {
+                            this.addMana(playerId, color as ManaColor, amount);
+                        }
+                    }
+                } else if (baseCard.type === 'Land' && baseCard.name) {
+                    // Fallback for basic lands missing producesMana
+                    const name = baseCard.name.toLowerCase();
+                    const basicMap: Record<string, ManaColor> = {
+                        'plains': 'W',
+                        'island': 'U',
+                        'swamp': 'B',
+                        'mountain': 'R',
+                        'forest': 'G',
+                    };
+                    const fallbackColor = basicMap[name];
+                    if (fallbackColor) {
+                        this.addMana(playerId, fallbackColor, 1);
+                    } else {
+                        console.warn(`ResourceManager: Land '${baseCard.name}' lacks producesMana and no fallback mapping found.`);
+                    }
+                }
+            }
+        }
+
         // Emit tap event
         this.dependencies.emitGameEventFn(EventType.ZONE_CHANGE, {
             playerId: playerId,
@@ -359,15 +399,32 @@ export class ResourceManager {
         // Check if the card is actually in the player's hand
         if (!playerState.hand.includes(cardObjectId)) {
             console.error(`ResourceManager Error: Card ${cardObjectId} not found in Player ${playerId}'s hand.`);
+            console.error(`Player ${playerId}'s hand:`, playerState.hand);
+            console.error(`Looking for card: ${cardObjectId}`);
             return false;
         }
 
-        // Get card details (Requires engine helper or GameState access)
-        const card = this.dependencies.getBaseCardDataFn(cardObjectId); // Assumes such a method exists or will be added
-        if (!card) {
-            console.error(`ResourceManager Error: Could not find card data for object ID ${cardObjectId}.`);
+        console.log(`ResourceManager: Found card ${cardObjectId} in player ${playerId}'s hand`);
+
+        // Get the game object first to find the base card ID
+        const gameObj = this.gameState.gameObjects[cardObjectId];
+        if (!gameObj) {
+            console.error(`ResourceManager Error: Could not find game object for instance ID ${cardObjectId}.`);
+            console.error(`Available game objects:`, Object.keys(this.gameState.gameObjects));
             return false;
         }
+
+        console.log(`ResourceManager: Found game object ${cardObjectId} with cardId ${gameObj.cardId}`);
+
+        // Get card details using the base card ID from the game object
+        const card = this.dependencies.getBaseCardDataFn(gameObj.cardId);
+        if (!card) {
+            console.error(`ResourceManager Error: Could not find card data for base card ID ${gameObj.cardId} (instance: ${cardObjectId}).`);
+            console.error(`Attempted to look up base card ID: ${gameObj.cardId}`);
+            return false;
+        }
+
+        console.log(`ResourceManager: Found base card data for ${gameObj.cardId}: ${card.name}`);
 
         // Check if the card is actually a resource type (e.g., 'Land')
         if (card.type !== 'Resource' && card.type !== 'Land') { // Check both just in case
@@ -396,14 +453,18 @@ export class ResourceManager {
              return false;
         }
 
-        console.log(`ResourceManager: Played resource ${cardObjectId} for player ${playerId}.`);
+    console.log(`ResourceManager: Played resource ${cardObjectId} for player ${playerId}.`);
+
+    // Mark that the player has played a resource/land this turn
+    playerState.hasPlayedResourceThisTurn = true;
+    // Preserve backward-compat flag if present
+    (playerState as any).landPlayedThisTurn = true;
 
         // 6. Apply effects (e.g., enter tapped) - Assert type for gameObject
         const gameObject = this.gameState.gameObjects[cardObjectId];
         if (gameObject) {
-            (gameObject as BattlefieldCard).tapped = true; // Assert using BattlefieldCard
-            console.log(`ResourceManager: Resource ${cardObjectId} entered tapped.`);
-            // TODO: Add mana generation ability logic if needed
+            (gameObject as BattlefieldCard).tapped = false; // Resources enter untapped by default
+            console.log(`ResourceManager: Resource ${cardObjectId} entered untapped.`);
         }
         return true;
     }

@@ -29,6 +29,11 @@ const ActionControls: React.FC = () => {
   const canPassPriority = priorityPlayerId === localPlayerId;
   const canPassTurn = activePlayerId === localPlayerId; // Player can only pass their own turn
 
+  const handleRefreshGameState = () => {
+    socketService.emit('request_game_state', {});
+    console.log('Request Game State action emitted by', localPlayerId);
+  };
+
   return (
     <div className="action-controls">
       {canPassPriority && (
@@ -44,6 +49,9 @@ const ActionControls: React.FC = () => {
       {!canPassPriority && !canPassTurn && ( // Show waiting if neither action is available for the local player
         <div>Waiting for opponent...</div>
       )}
+      <button onClick={handleRefreshGameState} style={{ marginTop: '10px', backgroundColor: '#6c757d', color: 'white' }}>
+        Refresh Game State (Dev)
+      </button>
     </div>
   );
 };

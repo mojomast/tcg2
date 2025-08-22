@@ -115,8 +115,18 @@ const DeckService = {
    * @param description Optional description
    */
   async createDeck(deckId: string, playerId: string, name: string, cards: { cardId: string; quantity: number }[], format?: string, description?: string): Promise<void> {
-    console.log(`[DeckService] Creating deck: ${name} (ID: ${deckId}) for player ${playerId}`);
+    console.log(`[DeckService] Attempting to create deck: ${name} (ID: ${deckId}) for player ${playerId}`);
+
+    // Check if the deck already exists
+    const existingDeckStmt = db.prepare('SELECT id FROM decks WHERE id = ?');
+    const existingDeck = existingDeckStmt.get(deckId);
+
+    if (existingDeck) {
+      console.log(`[DeckService] Deck with ID ${deckId} already exists. Skipping creation.`);
+      return;
+    }
     
+    console.log(`[DeckService] Deck ${deckId} not found. Proceeding with creation.`);
     const insertDeckStmt = db.prepare(`
       INSERT INTO decks (id, player_id, name, format, description, created_at, updated_at)
       VALUES (@id, @player_id, @name, @format, @description, datetime('now'), datetime('now'))

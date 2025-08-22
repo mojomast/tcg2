@@ -28,17 +28,34 @@ function shuffleArray<T>(array: T[]): T[] {
 
 export class GameEngine {
     public gameState: GameState;
-    public resourceManager!: ResourceManager; 
-    public turnManager!: TurnManager;         
-    public combatManager!: CombatManager | null; 
-    public actionManager!: ActionManager;       
+    public resourceManager!: ResourceManager;
+    public turnManager!: TurnManager;
+    public combatManager!: CombatManager | null;
+    public actionManager!: ActionManager;
     public stateManager: StateManager;
 
-    private cardDatabase: Map<string, Card> = new Map(); 
+    private cardDatabase: Map<string, Card> = new Map();
     private externalEventCallback?: (eventType: EventType, eventData: any) => void;
+    private idCounter: number = 0;
 
-    public generateGameObjectId(prefix: string = 'go'): GameObjectId {
-        return `${prefix}_${uuidv4()}`;
+    public generateGameObjectId(prefix: string = 'go', cardId?: string): GameObjectId {
+        this.idCounter++;
+
+        // If cardId is provided, create more readable ID using card name
+        if (cardId && prefix === 'card') {
+            const card = this.cardDatabase.get(cardId);
+            if (card) {
+                // Create readable ID from card name: e.g., "forest_1", "goblin_raider_2"
+                const cardName = card.name.toLowerCase()
+                    .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+                    .replace(/\s+/g, '_') // Replace spaces with underscores
+                    .substring(0, 12); // Limit length to keep IDs manageable
+                return `${cardName}_${this.idCounter}`;
+            }
+        }
+
+        // Fallback to simple counter-based ID
+        return `${prefix}_${this.idCounter}`;
     }
 
     public emitGameEvent(eventType: EventType, eventData: any): void {
@@ -143,9 +160,9 @@ export class GameEngine {
                     console.error(`[GameEngine] Error fetching deck ${deckId} for player ${playerId}:`, error);
                     throw error; // Propagate other errors
                 }
-                decklists[playerId] = playerDeckCards.map(card => ({ 
-                    ...card, 
-                    instanceId: this.generateGameObjectId(card.id) 
+                decklists[playerId] = playerDeckCards.map(card => ({
+                    ...card,
+                    instanceId: this.generateGameObjectId('card', card.id)
                 }));
                 console.log(`[DEBUG] GameEngine: Deck for player ${playerId} (${deckId}) loaded with ${decklists[playerId].length} cards.`);
             }
@@ -184,7 +201,7 @@ export class GameEngine {
         console.log('[DEBUG] Instantiating StateManager...');
         // StateManager Dependencies (no longer a separate const)
         // Instantiate StateManager FIRST
-        this.stateManager = new StateManager(this, this.gameState, this.getCardFromInstanceId.bind(this));
+        this.stateManager = new StateManager(this, this.gameState, this.getBaseCardData.bind(this));
 
         console.log('[DEBUG] Initializing Player States...');
         const initialPlayerStates = this.initializePlayers(playerIds, decklists); 
@@ -278,6 +295,16 @@ export class GameEngine {
         this.actionManager = new ActionManager(this.gameState, this, this.turnManager);
 
         console.log('[DEBUG] GameEngine _asyncInitialize complete.');
+
+        // Properly initialize the first turn by advancing from turn 0
+        console.log('[DEBUG] Starting first turn...');
+        this.gameState.turnNumber = 1;
+        this.gameState.activePlayerId = playerIds[0]; // Starting player
+        this.gameState.priorityPlayerId = null; // Clear priority during initialization
+
+        // Trigger the turn advancement to properly set up the turn phases
+        this.turnManager.advanceTurnState();
+
         this.emitGameEvent(EventType.GAME_READY, { gameState: this.gameState }); // Notify that the engine is ready
     }
 
@@ -329,7 +356,7 @@ export class GameEngine {
             const libraryInstanceIds: GameObjectId[] = [];
 
             for (const baseCard of playerDecklist) {
-                const instanceId = uuidv4();
+                const instanceId = this.generateGameObjectId('card', baseCard.id);
                 const battlefieldCard: BattlefieldCard = {
                     // Properties from base Card definition
                     id: baseCard.id, 

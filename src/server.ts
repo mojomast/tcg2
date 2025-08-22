@@ -93,6 +93,43 @@ const __dirname = path.dirname(__filename);
     cardService.createCard(forestCard);
     console.log(`[server]: Ensured '${forestCard.name}' exists in the database.`);
 
+    // Ensure Mountain and Swamp also exist with producesMana if not already present
+    const mountainCardId = 'basic-mountain-001';
+    const mountainCard: Card = {
+      id: mountainCardId,
+      name: 'Mountain',
+      type: 'Land',
+      rarity: 'Common',
+      rulesText: 'T: Add {R}.',
+      producesMana: { R: 1 },
+      colorIdentity: ['R'],
+      cost: {},
+      setId: 'CORE',
+      collectorNumber: '6',
+      text: 'T: Add {R}.',
+      subtype: undefined,
+    };
+    cardService.createCard(mountainCard);
+    console.log(`[server]: Ensured '${mountainCard.name}' exists in the database.`);
+
+    const swampCardId = 'basic-swamp-001';
+    const swampCard: Card = {
+      id: swampCardId,
+      name: 'Swamp',
+      type: 'Land',
+      rarity: 'Common',
+      rulesText: 'T: Add {B}.',
+      producesMana: { B: 1 },
+      colorIdentity: ['B'],
+      cost: {},
+      setId: 'CORE',
+      collectorNumber: '2',
+      text: 'T: Add {B}.',
+      subtype: undefined,
+    };
+    cardService.createCard(swampCard);
+    console.log(`[server]: Ensured '${swampCard.name}' exists in the database.`);
+
     const genericCreatureId = 'generic-creature-001';
     const genericCreature: Card = {
       id: genericCreatureId,
@@ -247,9 +284,54 @@ async function attemptToStartGame(
       const playerIdsForCreate: [PlayerId, PlayerId] = playersInfo.map(p => p.id) as [PlayerId, PlayerId]; // Re-ensure this is the value used
       console.log(`[DEBUG] server.ts: PRE-CALL GameEngine.create with playerIds: ${JSON.stringify(playerIdsForCreate)}, type: ${typeof playerIdsForCreate}`);
       console.log(`[DEBUG] server.ts: PRE-CALL GameEngine.create with playerDeckSelections: ${JSON.stringify(playerDeckSelections)}`);
-      console.log(`[DEBUG] server.ts: PRE-CALL GameEngine.create with externalEventCallback type: ${typeof externalEventCallback}`);
 
-      engine = await GameEngine.create(playerIdsForCreate, playerDeckSelections, externalEventCallback);
+      // Define the engine-specific callback for this game instance
+      const engineSpecificCallback = (eventType: EventType, eventData: any) => {
+        const gameEngineInstance = activeGames.get(gameId); // gameId from attemptToStartGame's scope
+
+        if (!gameEngineInstance) {
+          console.error(`[socket]: engineSpecificCallback (game ${gameId}): No game engine instance found. Cannot process event ${eventType}.`);
+          return;
+        }
+
+        console.log(`[server] Game Event Emitted by Engine (Game ID: ${gameId}) via Callback: Type: ${eventType}, Raw Payload:`, eventData);
+
+        let finalPayload = eventData;
+        const criticalEventTypesForFullState = [
+          EventType.TURN_PASSED,
+          EventType.GAME_OVER,
+          EventType.PRIORITY_CHANGED,
+          EventType.TURN_PHASE_CHANGED,
+          EventType.STEP_CHANGED,
+        ];
+
+        if (criticalEventTypesForFullState.includes(eventType)) {
+          console.log(`[socket]: Enriching event ${eventType} for game ${gameId} with full gameState.`);
+          finalPayload = { gameState: gameEngineInstance.gameState };
+        } else if (eventType === EventType.GAME_STATE_UPDATE) {
+          if (eventData && eventData.gameState) {
+            finalPayload = eventData;
+          } else {
+            console.warn(`[socket]: GAME_STATE_UPDATE from engine for ${gameId} did not have eventData.gameState. Wrapping current engine state.`);
+            finalPayload = { gameState: gameEngineInstance.gameState };
+          }
+        }
+
+        const gameEventToSend: GameEvent = {
+          type: eventType,
+          payload: finalPayload
+        };
+
+        io.to(gameId).emit('game_event', gameEventToSend);
+        console.log(`[socket]: Emitted game_event (${gameEventToSend.type}) to room ${gameId} with processed payload.`);
+      };
+
+      engine = await GameEngine.create(playerIdsForCreate, playerDeckSelections, engineSpecificCallback);
+      // Important: unify engine's internal gameId with the external room ID so broadcasts reach clients
+      if (engine && engine.gameState && engine.gameState.gameId !== gameId) {
+        console.log(`[server] Overriding engine.gameState.gameId (${engine.gameState.gameId}) -> room gameId (${gameId}) for socket room consistency.`);
+        engine.gameState.gameId = gameId as any; // Align engine state with room id
+      }
       activeGames.set(gameId, engine);
       console.log(`[server] GameEngine for ${gameId} created and stored successfully.`);
       gameSuccessfullyCreated = true;
@@ -648,39 +730,6 @@ app.get('/api/cards', (req: Request, res: Response): void => {
       }
     });
 
-    // API endpoint to get a specific deck by ID with full details
-    app.get('/api/decks/:id', async (req: Request, res: Response): Promise<void> => {
-      const { id } = req.params;
-      const playerId = req.query.playerId as string; // Assuming playerId might be needed for authorization in future
-
-      if (!playerId) { // Basic check, real auth would be more robust
-        res.status(400).json({ message: 'Player ID is required as a query parameter.', errorType: 'ValidationError', details: { field: 'playerId', issue: 'Player ID must be provided as a query parameter.' } });
-        return;
-      }
-
-      try {
-        console.log(`[server] GET /api/decks/${id} called by player ${playerId}`);
-        const deckDetails: DeckDetails = await deckService.getDeckById(id);
-
-        // Optional: Add authorization check here if decks are player-specific
-        if (deckDetails.player_id !== playerId) {
-          res.status(403).json({ message: 'Forbidden: You do not have access to this deck.', errorType: 'AuthorizationError' });
-          return;
-        }
-
-        res.json(deckDetails);
-      } catch (error) {
-        if (error instanceof DeckNotFoundError) {
-          console.warn(`[server] Deck not found for ID ${id}:`, error.message);
-          res.status(404).json({ message: error.message, errorType: 'DeckNotFoundError', details: { deckId: error.deckId } });
-          return;
-        }
-        console.error(`[server] Error fetching deck ${id}:`, error);
-        // It's good practice to hide internal error details from the client
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred.';
-        res.status(500).json({ message: `Failed to retrieve deck: ${errorMessage}`, errorType: 'InternalServerError' });
-      }
-    });
 
     // API endpoint to delete a deck and its associated cards
     app.delete('/api/decks/:id', (req: Request, res: Response): void => {
@@ -886,29 +935,54 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         { id: TEST_PLAYER_2_ID, socket: null, initialDeckId: 'defaultDeckP2' }  // No real socket for test player
       ];
 
-      const gameExternalEventCallback = (eventType: EventType, eventData: any) => {
-        const gameIdToBroadcast = testGameId; // Use the testGameId for this test game
-
-        if (!gameIdToBroadcast) {
-          // This should ideally not be reached if GameEngine always provides a valid gameId.
-          console.error(`[socket]: Game event received from engine without gameId (this shouldn't happen). Cannot broadcast. EventType: ${eventType}, EventData:`, eventData);
-          return;
-        }
-
-        // eventData is the payload of the game event.
-        // The GameEngine calls this callback as: externalEventCallback(type, payload, gameId)
-        // We then emit to the client: { type: eventType, payload: eventData }
-        // The client-side game_event handler will receive this structure.
-        console.log(`[server] Game Event Emitted by Engine (Game ID: ${gameIdToBroadcast}) via Callback:`, { type: eventType, payload: eventData });
-
-        io.to(gameIdToBroadcast).emit('game_event', { type: eventType, payload: eventData });
-
-        console.log(`[socket]: Emitted game_event (${eventType}) to room ${gameIdToBroadcast} (Game ID: ${gameIdToBroadcast})`);
-      };
+      
 
       console.log(`[server] Attempting to initialize placeholder test game: ${testGameId}`);
+
+      // Define the engine-specific callback for the test game instance
+      const testGameSpecificCallback = (eventType: EventType, eventData: any) => {
+        const gameId = testGameId; // Use testGameId for this specific callback
+        const gameEngineInstance = activeGames.get(gameId);
+
+        if (!gameEngineInstance) {
+            console.error(`[socket]: testGameSpecificCallback (game ${gameId}): No game engine instance found. Cannot process event ${eventType}.`);
+            return;
+        }
+
+        console.log(`[server] Game Event Emitted by Engine (Game ID: ${gameId}) via Callback: Type: ${eventType}, Raw Payload:`, eventData);
+
+        let finalPayload = eventData;
+        const criticalEventTypesForFullState = [
+            EventType.TURN_PASSED,
+            EventType.GAME_OVER,
+            EventType.PRIORITY_CHANGED,
+            EventType.TURN_PHASE_CHANGED,
+            EventType.STEP_CHANGED,
+        ];
+
+        if (criticalEventTypesForFullState.includes(eventType)) {
+            console.log(`[socket]: Enriching event ${eventType} for game ${gameId} with full gameState.`);
+            finalPayload = { gameState: gameEngineInstance.gameState };
+        } else if (eventType === EventType.GAME_STATE_UPDATE) {
+            if (eventData && eventData.gameState) {
+                finalPayload = eventData;
+            } else {
+                console.warn(`[socket]: GAME_STATE_UPDATE from engine for ${gameId} did not have eventData.gameState. Wrapping current engine state.`);
+                finalPayload = { gameState: gameEngineInstance.gameState };
+            }
+        }
+
+        const gameEventToSend: GameEvent = {
+            type: eventType,
+            payload: finalPayload
+        };
+
+        io.to(gameId).emit('game_event', gameEventToSend);
+        console.log(`[socket]: Emitted game_event (${gameEventToSend.type}) to room ${gameId} with processed payload.`);
+      };
+
       // Cast to 'any' for socket to bypass type checking for this placeholder
-      const engine = await attemptToStartGame(testGameId, testPlayersInfo as any, gameExternalEventCallback);
+      const engine = await attemptToStartGame(testGameId, testPlayersInfo as any, testGameSpecificCallback);
       if (engine) {
         console.log(`[server] Placeholder test game ${testGameId} initialized successfully.`);
         // The engine is already added to activeGames by attemptToStartGame
@@ -930,41 +1004,49 @@ app.get('/api/cards', (req: Request, res: Response): void => {
       // Handle join_game events from the GameBoard
       socket.on('join_game', (data: { gameId: string, playerId: string }) => {
         console.log(`[server.ts]: Player ${data.playerId} joining game ${data.gameId}`);
-        
+
         // Join the socket to the game room
         socket.join(data.gameId);
         socket.data.gameId = data.gameId;
         socket.data.playerId = data.playerId;
-        
+
         // Send a simple game ready event for now
         // Get the real game state from the game engine instead of using mock data
         const gameEngine = activeGames.get(data.gameId);
-        
+
         if (!gameEngine) {
           console.error(`[server.ts]: No game engine found for game ${data.gameId}`);
           return;
         }
-        
+
         // Use the actual game state from the engine
         const realGameState = gameEngine.gameState;
-        
+
+        // In single-player mode, ensure the active player matches the socket connection
+        // This prevents "opponent's turn" issues when starting a game
+        if (realGameState.activePlayerId !== data.playerId) {
+          console.log(`[server.ts]: Adjusting active player from ${realGameState.activePlayerId} to ${data.playerId} for single-player mode`);
+          realGameState.activePlayerId = data.playerId;
+          realGameState.priorityPlayerId = data.playerId;
+        }
+
         // Emit game ready event to ALL players in the game room
         io.to(data.gameId).emit('game_event', {
           type: EventType.GAME_READY,
           payload: { gameState: realGameState }
         });
-        
+
         console.log(`[server.ts]: Broadcasted GAME_READY event to all players in room ${data.gameId}`);
-        
+
         // Also emit a player joined event to notify other players
         socket.to(data.gameId).emit('game_event', {
           type: 'PLAYER_JOINED',
-          payload: { 
+          payload: {
             playerId: data.playerId,
-            message: `${data.playerId} joined the game` 
+            message: `${data.playerId} joined the game`
           }
         });
-        
+
         console.log(`[server.ts]: Notified other players that ${data.playerId} joined`);
       });
 
@@ -988,24 +1070,21 @@ app.get('/api/cards', (req: Request, res: Response): void => {
 
       socket.on('play_card', (data: { playerId: string, cardInstanceId: string, targets?: string[] }) => {
         console.log(`[server.ts]: Received play_card from ${data.playerId} for card ${data.cardInstanceId}`);
-        
-        // Validate player ID matches socket
-        if (data.playerId !== socket.data.playerId) {
-          console.warn(`[server.ts]: Player ID mismatch for play_card. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
-          socket.emit('action_error', { message: 'Player ID mismatch.' });
-          return;
-        }
-        
+
+        // In single-player mode, the socket might be connected as player1 but the user is controlling player2
+        // For now, we'll allow the action if we can find a game engine for this socket
         const gameEngine = getGameEngineForSocket(socket);
         if (gameEngine) {
           try {
+            // Use the playerId from the data, not the socket
             gameEngine.playCard(data.playerId, data.cardInstanceId, data.targets);
             // If no exception was thrown, the action was successful
             broadcastGameStateUpdate(gameEngine);
             console.log(`[server.ts]: Card play successful for ${data.cardInstanceId}, game state broadcasted.`);
           } catch (error) {
-            console.error(`[server.ts]: Error during play_card for player ${data.playerId}:`, error);
-            socket.emit('action_error', { message: 'Card play action failed due to internal error.' });
+            const err = error as Error;
+            console.error(`[server.ts]: Error during play_card for player ${data.playerId}:`, err?.message || err);
+            socket.emit('action_error', { message: err?.message || 'Card play action failed due to internal error.' });
           }
         } else {
           console.error(`[server.ts]: Game engine not found for socket ${socket.id} during play_card.`);
@@ -1017,8 +1096,11 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         console.log(`[server.ts]: Received pass_turn from ${data.playerId}`);
         const gameEngine = getGameEngineForSocket(socket);
         if (gameEngine && gameEngine.turnManager) {
+            console.log(`[server.ts pass_turn PRE-ACTION]: GameID: ${gameEngine.gameState.gameId}, Current activePlayerId: ${gameEngine.gameState.activePlayerId}, Current priorityPlayerId: ${gameEngine.gameState.priorityPlayerId}`);
             const success = gameEngine.turnManager.passTurn(data.playerId);
+            console.log(`[server.ts pass_turn POST-ACTION]: GameID: ${gameEngine.gameState.gameId}, New activePlayerId: ${gameEngine.gameState.activePlayerId}, New priorityPlayerId: ${gameEngine.gameState.priorityPlayerId}, Success: ${success}`);
             if (success) {
+                console.log(`[server.ts pass_turn PRE-BROADCAST]: Broadcasting state for GameID: ${gameEngine.gameState.gameId} with activePlayerId: ${gameEngine.gameState.activePlayerId}`);
                 broadcastGameStateUpdate(gameEngine);
                 console.log(`[server.ts]: Turn pass successful, game state broadcasted.`);
             } else {
@@ -1028,6 +1110,48 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         } else {
             console.error(`[server.ts]: Game engine or turn manager not found for socket ${socket.id} during pass_turn.`);
             socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
+      // NEW HANDLER FOR 'pass_priority'
+      socket.on('pass_priority', (data: { playerId: string }) => {
+        console.log(`[server.ts]: Received pass_priority from ${data.playerId}`);
+        
+        // Validate player ID matches socket's stored player ID
+        if (data.playerId !== socket.data.playerId) {
+          console.warn(`[server.ts]: Player ID mismatch for pass_priority. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
+          socket.emit('action_error', { message: 'Player ID mismatch.' });
+          return;
+        }
+
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine && gameEngine.actionManager) {
+            try {
+                gameEngine.actionManager.passPriority(data.playerId); // Assume this returns void and throws on error
+                // If we reach here, the action was successful
+                broadcastGameStateUpdate(gameEngine);
+                console.log(`[server.ts]: Priority pass successful for player ${data.playerId}, game state broadcasted.`);
+            } catch (error) {
+                console.error(`[server.ts]: Error during pass_priority for player ${data.playerId}:`, error);
+                const errorMessage = error instanceof Error ? error.message : 'Pass priority action failed due to an internal error.';
+                socket.emit('action_error', { message: errorMessage });
+            }
+        } else {
+            console.error(`[server.ts]: Game engine or action manager not found for socket ${socket.id} during pass_priority.`);
+            socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
+      socket.on('request_game_state', () => {
+        const gameEngine = getGameEngineForSocket(socket);
+        if (gameEngine) {
+          const gameState = gameEngine.gameState;
+          console.log(`[socket request_game_state]: GameID: ${gameState.gameId}, Current activePlayerId: ${gameState.activePlayerId}, Current priorityPlayerId: ${gameState.priorityPlayerId}`);
+          socket.emit('game_event', { type: EventType.GAME_STATE_UPDATE, payload: { gameState } });
+          console.log(`[socket] Sent game_state_update to ${socket.id} on manual request.`);
+        } else {
+          socket.emit('game_error', { message: 'Game not found for manual refresh request.' });
+          console.warn(`[socket] No game engine found for socket ${socket.id} during manual refresh request.`);
         }
       });
 
@@ -1094,24 +1218,37 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         }
       });
 
-      socket.on('play_resource', (data: { playerId: string, cardInstanceId: string }) => {
-        console.log(`[server.ts]: Received play_resource from ${data.playerId} for card ${data.cardInstanceId}`);
-        
-        // Validate player ID matches socket
-        if (data.playerId !== socket.data.playerId) {
-          console.warn(`[server.ts]: Player ID mismatch for play_resource. Socket: ${socket.data.playerId}, Data: ${data.playerId}`);
-          socket.emit('action_error', { message: 'Player ID mismatch.' });
+      socket.on('play_resource', (data: { cardId?: string, playerId?: string, cardInstanceId?: string }) => {
+        console.log(`[server.ts]: Received play_resource with data:`, data);
+
+        // Handle different payload formats for backwards compatibility
+        let cardId: string;
+        let playerId: string;
+
+        if (data.cardId) {
+          // New format
+          cardId = data.cardId;
+          playerId = socket.data.playerId || 'unknown';
+        } else if (data.cardInstanceId && data.playerId) {
+          // Old format from frontend
+          cardId = data.cardInstanceId;
+          playerId = data.playerId;
+        } else {
+          console.warn(`[server.ts]: Invalid play_resource payload format:`, data);
+          socket.emit('action_error', { message: 'Invalid payload format.' });
           return;
         }
+
+        console.log(`[server.ts]: Processing play_resource - Player: ${playerId}, Card: ${cardId}`);
         
         const gameEngine = getGameEngineForSocket(socket);
         if (gameEngine && gameEngine.resourceManager) {
           try {
-            gameEngine.resourceManager.playResource(data.playerId, data.cardInstanceId);
+            gameEngine.resourceManager.playResource(playerId, cardId);
             broadcastGameStateUpdate(gameEngine);
-            console.log(`[server.ts]: Resource play successful for ${data.cardInstanceId}, game state broadcasted.`);
+            console.log(`[server.ts]: Resource play successful for ${cardId}, game state broadcasted.`);
           } catch (error) {
-            console.error(`[server.ts]: Error during play_resource for player ${data.playerId}:`, error);
+            console.error(`[server.ts]: Error during play_resource for player ${playerId}:`, error);
             socket.emit('action_error', { message: 'Resource play action failed due to internal error.' });
           }
         } else {
@@ -1143,6 +1280,20 @@ app.get('/api/cards', (req: Request, res: Response): void => {
         } else {
           console.error(`[server.ts]: Game engine or resource manager not found for socket ${socket.id} during tap_card.`);
           socket.emit('action_error', { message: 'Game not found or not initialized.' });
+        }
+      });
+
+      // Handle player switching in single-player mode
+      socket.on('switch_player', (data: { gameId: string, newPlayerId: string }) => {
+        console.log(`[server.ts]: Player switching in single-player mode - Game: ${data.gameId}, New Player: ${data.newPlayerId}`);
+
+        const gameEngine = activeGames.get(data.gameId);
+        if (gameEngine) {
+          // Update the socket's player ID to reflect the switch
+          socket.data.playerId = data.newPlayerId;
+          console.log(`[server.ts]: Updated socket ${socket.id} to control ${data.newPlayerId}`);
+        } else {
+          console.error(`[server.ts]: Game ${data.gameId} not found for player switch`);
         }
       });
 
